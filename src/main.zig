@@ -10,19 +10,27 @@ const std = @import("std");
 // and the MSBs contain a version id for each entity
 
 const Options = struct {
-    size: u32,
+    size: usize,
+    handle: type,
 };
 
 pub fn Context(comptime Entity: type, comptime options: Options) type {
+    std.debug.assert(std.math.isPowerOfTwo(options.size));
+
     return struct {
         const Ctx = @This();
+
         pub const Component = std.meta.FieldEnum(Entity);
         pub const n_components = std.meta.fields(Component).len;
+
         pub const size = options.size;
+        pub const Handle = options.handle;
+        pub const mask_slot = std.math.maxInt(std.meta.Int(.unsigned, std.math.log2_int(usize, size)));
 
         pub const View = struct {
             mask: std.StaticBitSet(size),
             data: []Entity,
+            cursor: usize,
         };
 
         alloc: std.mem.Allocator,
@@ -30,29 +38,37 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
         // actual storage of entities
         data: []Entity,
         // indicates what entities in the array are in use
-        entities: *std.StaticBitSet(size),
+        extant: *std.StaticBitSet(size),
         // for each entity, indicates if that component is in use
         components: []std.StaticBitSet(size),
+        // current identifiers
+        handles: []Handle,
 
         pub fn init(alloc: std.mem.Allocator) !Ctx {
             var ctx = Ctx{
                 .alloc = alloc,
                 .data = undefined,
-                .entities = undefined,
+                .extant = undefined,
                 .components = undefined,
+                .handles = undefined,
             };
 
             // NOTE is there a nicer way of allocating several things safely?
-            ctx.data = try alloc.alloc(Entity, options.size);
+            ctx.data = try alloc.alloc(Entity, size);
             errdefer alloc.free(ctx.data);
-            ctx.entities = try alloc.create(std.StaticBitSet(options.size));
-            errdefer alloc.destroy(ctx.entities);
-            ctx.components = try alloc.alloc(std.StaticBitSet(options.size), n_components);
+            ctx.extant = try alloc.create(std.StaticBitSet(size));
+            errdefer alloc.destroy(ctx.extant);
+            ctx.components = try alloc.alloc(std.StaticBitSet(size), n_components);
             errdefer alloc.free(ctx.components);
+            ctx.handles = try alloc.alloc(Handle, size);
+            errdefer alloc.free(ctx.handles);
 
-            ctx.entities.* = std.StaticBitSet(options.size).initEmpty();
+            ctx.extant.* = std.StaticBitSet(options.size).initEmpty();
             for (0..n_components) |i| {
                 ctx.components[i] = std.StaticBitSet(options.size).initEmpty();
+            }
+            for (0..size) |i| {
+                ctx.handles[i] = 0;
             }
 
             return ctx;
@@ -60,20 +76,36 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
 
         pub fn deinit(ctx: *Ctx) void {
             ctx.alloc.free(ctx.data);
-            ctx.alloc.destroy(ctx.entities);
+            ctx.alloc.destroy(ctx.extant);
             ctx.alloc.free(ctx.components);
+            ctx.alloc.free(ctx.handles);
             ctx.* = undefined;
         }
 
         pub fn create(ctx: *Ctx) !u64 {
+            if (ctx.active.complement.findFirstSet()) |i| {
+                _ = i;
+            } else {
+                return error.EntityContextFull;
+            }
+        }
+
+        pub fn has(ctx: *Ctx, e: Handle, cmp: Component) bool {
             _ = ctx;
-            // if (ctx.active.complement.findFirstSet()) |i| {}
+            _ = e;
+            _ = cmp;
         }
 
         pub fn view(ctx: *Ctx, includes: anytype, excludes: anytype) View {
             _ = ctx;
             _ = includes;
             _ = excludes;
+        }
+
+        pub fn get(ctx: *Ctx, handle: Handle) !Entity {
+            const slot = handle & mask_slot;
+            _ = ctx;
+            _ = slot;
         }
     };
 }
@@ -91,13 +123,17 @@ test "basics" {
 
     std.debug.print("{} {}\n", .{ @sizeOf(T), @alignOf(T) });
 
-    var ctx = try Context(T, .{ .size = 1024 }).init(std.testing.allocator);
+    var ctx = try Context(T, .{
+        .size = 512,
+        .handle = u64,
+    }).init(std.testing.allocator);
     defer ctx.deinit();
 
-    const vw = @TypeOf(ctx).View{ .mask = undefined, .data = undefined };
+    const vw = @TypeOf(ctx).View{ .mask = undefined, .data = undefined, .cursor = undefined };
 
     std.debug.print("{}\n", .{@sizeOf(@TypeOf(ctx))});
     std.debug.print("{}\n", .{@sizeOf(@TypeOf(vw))});
+    std.debug.print("{x}\n", .{@TypeOf(ctx).mask_slot});
 }
 
 // // ensure alignment on cache line boundaries
