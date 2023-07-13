@@ -30,7 +30,6 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
         pub const View = struct {
             mask: std.StaticBitSet(size),
             data: []Entity,
-            cursor: usize,
         };
 
         alloc: std.mem.Allocator,
@@ -68,7 +67,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
                 ctx.components[i] = std.StaticBitSet(options.size).initEmpty();
             }
             for (0..size) |i| {
-                ctx.handles[i] = 0;
+                ctx.handles[i] = i;
             }
 
             return ctx;
@@ -82,30 +81,59 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             ctx.* = undefined;
         }
 
-        pub fn create(ctx: *Ctx) !u64 {
-            if (ctx.active.complement.findFirstSet()) |i| {
-                _ = i;
+        pub fn create(ctx: *Ctx) !Handle {
+            if (ctx.extant.complement().findFirstSet()) |i| {
+                ctx.handles[i] += size; // generational increment
+                ctx.extant.set(i);
+                return ctx.handles[i];
             } else {
                 return error.EntityContextFull;
             }
         }
 
-        pub fn has(ctx: *Ctx, e: Handle, cmp: Component) bool {
-            _ = ctx;
-            _ = e;
-            _ = cmp;
+        pub fn add(ctx: *Ctx, handle: Handle, comptime component: Component, value: anytype) void {
+            const slot = handle & mask_slot;
+            if (handle != ctx.handles[slot]) {
+                std.log.warn("used out of date handle in add", .{});
+                return;
+            }
+
+            // this is a pretty awkward construction...
+            // but it should basically disappear at compile time
+            // and become entity.component = value
+            @field(
+                ctx.data[slot],
+                std.meta.fieldInfo(Entity, component).name,
+            ) = value;
+            ctx.components[@enumToInt(component)].set(slot);
+        }
+
+        pub fn has(ctx: *Ctx, handle: Handle, comptime component: Component) bool {
+            const slot = handle & mask_slot;
+            if (handle != ctx.handles[slot]) {
+                std.log.warn("used out of date handle in has", .{});
+                return false;
+            }
+            return ctx.components[@enumToInt(component)].isSet(slot);
         }
 
         pub fn view(ctx: *Ctx, includes: anytype, excludes: anytype) View {
             _ = ctx;
             _ = includes;
             _ = excludes;
+
+            return View{
+                .mask = undefined,
+                .data = undefined,
+            };
         }
 
-        pub fn get(ctx: *Ctx, handle: Handle) !Entity {
+        pub fn get(ctx: *Ctx, handle: Handle) ?*Entity {
             const slot = handle & mask_slot;
-            _ = ctx;
-            _ = slot;
+            if (handle != ctx.handles[slot]) {
+                return null;
+            }
+            return &ctx.data[slot];
         }
     };
 }
@@ -129,63 +157,25 @@ test "basics" {
     }).init(std.testing.allocator);
     defer ctx.deinit();
 
-    const vw = @TypeOf(ctx).View{ .mask = undefined, .data = undefined, .cursor = undefined };
+    const vw = @TypeOf(ctx).View{
+        .mask = undefined,
+        .data = undefined,
+    };
 
     std.debug.print("{}\n", .{@sizeOf(@TypeOf(ctx))});
     std.debug.print("{}\n", .{@sizeOf(@TypeOf(vw))});
     std.debug.print("{x}\n", .{@TypeOf(ctx).mask_slot});
+
+    var e1 = try ctx.create();
+    var e2 = try ctx.create();
+
+    std.debug.print("{} {}\n", .{ e1, e2 });
+
+    ctx.add(e1, .a, 3);
+    std.debug.print("has a:{} has b:{} has c:{} {}\n", .{
+        ctx.has(e1, .a),
+        ctx.has(e1, .b),
+        ctx.has(e1, .c),
+        ctx.get(e1).?,
+    });
 }
-
-// // ensure alignment on cache line boundaries
-// // should also be bigger than any type might possibly have?
-// const page_alignment = 64;
-
-// // what should we call it?
-// // manager? hub? componentcontainer?
-// pub const Context = struct {
-//     pub const Settings = struct {
-//         page_size: u32 = 4096,
-//         growable: bool = false,
-//     };
-
-//     pub const Page = struct {
-//         next: ?*align(page_alignment) @This(),
-//     };
-//     const PagePtr = *align(page_alignment) Page;
-
-//     alloc: std.mem.Allocator,
-//     settings: Settings,
-
-//     n_pages: u32,
-//     free_list: ?PagePtr = null,
-
-//     pub fn init(
-//         alloc: std.mem.Allocator,
-//         initial_page_count: u32,
-//         settings: Settings,
-//     ) !Context {
-//         var ctx = Context{
-//             .alloc = alloc,
-//             .settings = settings,
-//             .n_pages = initial_page_count,
-//         };
-
-//         return ctx;
-//     }
-
-//     pub fn deinit() void {}
-
-//     fn allocPage(ctx: *Context) !*align(page_alignment) []u8 {
-//         const page = try ctx.alloc.alignedAlloc(u8, page_alignment, ctx.settings.page_size);
-//         _ = page;
-//         // if (ctx.free_list)
-//     }
-// };
-
-// test "basic add functionality" {
-//     try testing.expect(true);
-//     _ = std.heap.MemoryPool(i32); // just for easy going to source
-
-//     var ctx = try Context.init(std.testing.allocator, 32, .{});
-//     _ = ctx;
-// }
