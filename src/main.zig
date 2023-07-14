@@ -85,7 +85,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
                 ctx.components[i] = std.StaticBitSet(options.size).initEmpty();
             }
             for (0..size) |i| {
-                ctx.handles[i] = i;
+                ctx.handles[i] = @truncate(Handle, i);
             }
 
             return ctx;
@@ -101,7 +101,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
 
         pub fn create(ctx: *Ctx) !Handle {
             if (ctx.extant.complement().findFirstSet()) |i| {
-                ctx.handles[i] += size; // generational increment
+                ctx.handles[i] += @truncate(Handle, size); // generational increment
                 ctx.extant.set(i);
                 return ctx.handles[i];
             } else {
@@ -182,7 +182,7 @@ test "basics" {
 
     var ctx = try Context(T, .{
         .size = 512,
-        .handle = u64,
+        .handle = u32,
     }).init(std.testing.allocator);
     defer ctx.deinit();
 
