@@ -118,14 +118,18 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
         }
 
         pub fn view(ctx: *Ctx, includes: anytype, excludes: anytype) View {
-            _ = ctx;
-            _ = includes;
             _ = excludes;
 
-            return View{
-                .mask = undefined,
+            var result = View{
+                .mask = std.StaticBitSet(size).initFull(),
                 .data = undefined,
             };
+
+            inline for (includes) |component| {
+                result.mask.intersectWith(ctx.components[@enumToInt(component)]);
+            }
+
+            return result;
         }
 
         pub fn get(ctx: *Ctx, handle: Handle) ?*Entity {
@@ -172,10 +176,23 @@ test "basics" {
     std.debug.print("{} {}\n", .{ e1, e2 });
 
     ctx.add(e1, .a, 3);
+    ctx.add(e1, .b, .{ 1, 2, 3, 4 });
+    ctx.add(e2, .b, .{ 5, 6, 7, 8 });
+    ctx.add(e2, .c, {});
+
     std.debug.print("has a:{} has b:{} has c:{} {}\n", .{
         ctx.has(e1, .a),
         ctx.has(e1, .b),
         ctx.has(e1, .c),
         ctx.get(e1).?,
     });
+    std.debug.print("has a:{} has b:{} has c:{} {}\n", .{
+        ctx.has(e2, .a),
+        ctx.has(e2, .b),
+        ctx.has(e2, .c),
+        ctx.get(e2).?,
+    });
+
+    const view_b = ctx.view(.{.b}, .{});
+    _ = view_b;
 }
