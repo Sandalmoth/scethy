@@ -30,6 +30,24 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
         pub const View = struct {
             mask: std.StaticBitSet(size),
             data: []Entity,
+            cursor: usize,
+
+            pub fn next(vw: *View) ?*Entity {
+                // there's probably some faster/better way of doing this?
+
+                while (vw.cursor < vw.data.len and !vw.mask.isSet(vw.cursor)) : (vw.cursor += 1) {}
+                if (vw.cursor < vw.data.len) {
+                    const tmp = vw.cursor; // need post increment lol
+                    vw.cursor += 1;
+                    return &vw.data[tmp];
+                } else {
+                    return null;
+                }
+            }
+
+            pub fn reset(vw: *View) void {
+                vw.cursor = 0;
+            }
         };
 
         alloc: std.mem.Allocator,
@@ -118,15 +136,22 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
         }
 
         pub fn view(ctx: *Ctx, includes: anytype, excludes: anytype) View {
-            _ = excludes;
-
             var result = View{
-                .mask = std.StaticBitSet(size).initFull(),
-                .data = undefined,
+                .mask = ctx.extant.*,
+                .data = ctx.data,
+                .cursor = 0,
             };
 
             inline for (includes) |component| {
-                result.mask.intersectWith(ctx.components[@enumToInt(component)]);
+                result.mask.setIntersection(
+                    ctx.components[@enumToInt(@as(Component, component))],
+                );
+            }
+
+            inline for (excludes) |component| {
+                result.mask.setIntersection(
+                    ctx.components[@enumToInt(@as(Component, component))].complement(),
+                );
             }
 
             return result;
@@ -161,13 +186,7 @@ test "basics" {
     }).init(std.testing.allocator);
     defer ctx.deinit();
 
-    const vw = @TypeOf(ctx).View{
-        .mask = undefined,
-        .data = undefined,
-    };
-
     std.debug.print("{}\n", .{@sizeOf(@TypeOf(ctx))});
-    std.debug.print("{}\n", .{@sizeOf(@TypeOf(vw))});
     std.debug.print("{x}\n", .{@TypeOf(ctx).mask_slot});
 
     var e1 = try ctx.create();
@@ -193,6 +212,33 @@ test "basics" {
         ctx.get(e2).?,
     });
 
-    const view_b = ctx.view(.{.b}, .{});
-    _ = view_b;
+    std.debug.print("entities with a\n", .{});
+    var view_a = ctx.view(.{.a}, .{});
+    while (view_a.next()) |entity| {
+        std.debug.print("{}\n", .{entity});
+    }
+
+    std.debug.print("entities with b\n", .{});
+    var view_b = ctx.view(.{.b}, .{});
+    while (view_b.next()) |entity| {
+        std.debug.print("{}\n", .{entity});
+    }
+
+    std.debug.print("entities with c\n", .{});
+    var view_c = ctx.view(.{.c}, .{});
+    while (view_c.next()) |entity| {
+        std.debug.print("{}\n", .{entity});
+    }
+
+    std.debug.print("entities with b without a\n", .{});
+    var view_ba = ctx.view(.{.b}, .{.a});
+    while (view_ba.next()) |entity| {
+        std.debug.print("{}\n", .{entity});
+    }
+
+    std.debug.print("entities with b without c\n", .{});
+    var view_bc = ctx.view(.{.b}, .{.c});
+    while (view_bc.next()) |entity| {
+        std.debug.print("{}\n", .{entity});
+    }
 }
