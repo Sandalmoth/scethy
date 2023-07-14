@@ -85,6 +85,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
                 ctx.components[i] = std.StaticBitSet(options.size).initEmpty();
             }
             for (0..size) |i| {
+                ctx.data[i] = undefined;
                 ctx.handles[i] = @truncate(Handle, i);
             }
 
@@ -109,6 +110,20 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             }
         }
 
+        pub fn destroy(ctx: *Ctx, handle: Handle) void {
+            const slot = handle & mask_slot;
+            if (handle != ctx.handles[slot]) {
+                std.log.warn("used out of date handle in destroy", .{});
+                return;
+            }
+
+            ctx.extant.unset(slot);
+            for (0..n_components) |i| {
+                ctx.components[i].unset(i);
+            }
+            ctx.data[slot] = undefined;
+        }
+
         pub fn add(ctx: *Ctx, handle: Handle, comptime component: Component, value: anytype) void {
             const slot = handle & mask_slot;
             if (handle != ctx.handles[slot]) {
@@ -124,6 +139,21 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
                 std.meta.fieldInfo(Entity, component).name,
             ) = value;
             ctx.components[@enumToInt(component)].set(slot);
+        }
+
+        pub fn remove(ctx: *Ctx, handle: Handle, comptime component: Component) void {
+            const slot = handle & mask_slot;
+            if (handle != ctx.handles[slot]) {
+                std.log.warn("used out of date handle in remove", .{});
+                return;
+            }
+
+            //  does this get removed in release compilation?
+            @field(
+                ctx.data[slot],
+                std.meta.fieldInfo(Entity, component).name,
+            ) = undefined;
+            ctx.components[@enumToInt(component)].unset(slot);
         }
 
         pub fn has(ctx: *Ctx, handle: Handle, comptime component: Component) bool {
@@ -230,6 +260,12 @@ test "basics" {
         std.debug.print("{}\n", .{entity});
     }
 
+    std.debug.print("modifying entities with b\n", .{});
+    view_b.reset();
+    while (view_b.next()) |entity| {
+        entity.b += @splat(4, @as(f32, 0.5));
+    }
+
     std.debug.print("entities with b without a\n", .{});
     var view_ba = ctx.view(.{.b}, .{.a});
     while (view_ba.next()) |entity| {
@@ -239,6 +275,21 @@ test "basics" {
     std.debug.print("entities with b without c\n", .{});
     var view_bc = ctx.view(.{.b}, .{.c});
     while (view_bc.next()) |entity| {
+        std.debug.print("{}\n", .{entity});
+    }
+
+    std.debug.print("removing b from e1\n", .{});
+    ctx.remove(e1, .b);
+    var view_b2 = ctx.view(.{.b}, .{});
+    while (view_b2.next()) |entity| {
+        std.debug.print("{}\n", .{entity});
+    }
+    ctx.add(e1, .b, .{ 1, 2, 3, 4 });
+
+    std.debug.print("destroying e2\n", .{});
+    ctx.destroy(e2);
+    var view_b3 = ctx.view(.{.b}, .{});
+    while (view_b3.next()) |entity| {
         std.debug.print("{}\n", .{entity});
     }
 }
