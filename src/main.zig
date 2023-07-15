@@ -141,6 +141,19 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             ctx.components[@enumToInt(component)].set(slot);
         }
 
+        pub fn addTypes(ctx: *Ctx, handle: Handle, components: anytype) void {
+            const slot = handle & mask_slot;
+            if (handle != ctx.handles[slot]) {
+                std.log.warn("used out of date handle in addTypes", .{});
+                return;
+            }
+
+            inline for (components) |component| {
+                ctx.components[@enumToInt(@as(Component, component))].set(slot);
+                ctx.entities[slot] = std.mem.zeroes(std.meta.fieldInfo(Entity, @as(Component, component)).type);
+            }
+        }
+
         pub fn remove(ctx: *Ctx, handle: Handle, comptime component: Component) void {
             const slot = handle & mask_slot;
             if (handle != ctx.handles[slot]) {
@@ -154,6 +167,24 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
                 std.meta.fieldInfo(Entity, component).name,
             ) = undefined;
             ctx.components[@enumToInt(component)].unset(slot);
+        }
+
+        pub fn removeTypes(ctx: *Ctx, handle: Handle, components: anytype) void {
+            const slot = handle & mask_slot;
+            if (handle != ctx.handles[slot]) {
+                std.log.warn("used out of date handle in addTypes", .{});
+                return;
+            }
+
+            inline for (components) |component| {
+                ctx.components[@enumToInt(@as(Component, component))].unset(slot);
+                ctx.entities[slot] = undefined;
+            }
+        }
+
+        pub fn valid(ctx: *Ctx, handle: Handle) bool {
+            const slot = handle & mask_slot;
+            return handle == ctx.handles[slot];
         }
 
         pub fn has(ctx: *Ctx, handle: Handle, comptime component: Component) bool {
