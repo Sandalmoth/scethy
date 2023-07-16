@@ -100,6 +100,14 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             ctx.* = undefined;
         }
 
+        pub fn slot(ctx: *Ctx, handle: Handle) ?Handle {
+            const _slot = handle & mask_slot;
+            if (!ctx.extant.isSet(_slot) or handle != ctx.handles[_slot]) {
+                return null;
+            }
+            return _slot;
+        }
+
         pub fn create(ctx: *Ctx) !Handle {
             if (ctx.extant.complement().findFirstSet()) |i| {
                 ctx.handles[i] += @truncate(Handle, size); // generational increment
@@ -111,89 +119,98 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
         }
 
         pub fn destroy(ctx: *Ctx, handle: Handle) void {
-            const slot = handle & mask_slot;
-            if (handle != ctx.handles[slot]) {
-                std.log.warn("used out of date handle in destroy", .{});
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
                 return;
-            }
+            };
 
-            ctx.extant.unset(slot);
+            ctx.extant.unset(_slot);
             for (0..n_components) |i| {
                 ctx.components[i].unset(i);
             }
-            ctx.data[slot] = undefined;
+            ctx.data[_slot] = undefined;
         }
 
         pub fn add(ctx: *Ctx, handle: Handle, comptime component: Component, value: anytype) void {
-            const slot = handle & mask_slot;
-            if (handle != ctx.handles[slot]) {
-                std.log.warn("used out of date handle in add", .{});
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
                 return;
-            }
+            };
 
             // this is a pretty awkward construction...
             // but it should basically disappear at compile time
             // and become entity.component = value
             @field(
-                ctx.data[slot],
+                ctx.data[_slot],
                 std.meta.fieldInfo(Entity, component).name,
             ) = value;
-            ctx.components[@enumToInt(component)].set(slot);
+            ctx.components[@enumToInt(component)].set(_slot);
         }
 
         pub fn addTypes(ctx: *Ctx, handle: Handle, components: anytype) void {
-            const slot = handle & mask_slot;
-            if (handle != ctx.handles[slot]) {
-                std.log.warn("used out of date handle in addTypes", .{});
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
                 return;
-            }
+            };
 
             inline for (components) |component| {
-                ctx.components[@enumToInt(@as(Component, component))].set(slot);
-                ctx.entities[slot] = std.mem.zeroes(std.meta.fieldInfo(Entity, @as(Component, component)).type);
+                ctx.components[@enumToInt(@as(Component, component))].set(_slot);
+                ctx.entities[_slot] = std.mem.zeroes(std.meta.fieldInfo(Entity, @as(Component, component)).type);
             }
         }
 
         pub fn remove(ctx: *Ctx, handle: Handle, comptime component: Component) void {
-            const slot = handle & mask_slot;
-            if (handle != ctx.handles[slot]) {
-                std.log.warn("used out of date handle in remove", .{});
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
                 return;
-            }
+            };
 
             //  does this get removed in release compilation?
             @field(
-                ctx.data[slot],
+                ctx.data[_slot],
                 std.meta.fieldInfo(Entity, component).name,
             ) = undefined;
-            ctx.components[@enumToInt(component)].unset(slot);
+            ctx.components[@enumToInt(component)].unset(_slot);
         }
 
         pub fn removeTypes(ctx: *Ctx, handle: Handle, components: anytype) void {
-            const slot = handle & mask_slot;
-            if (handle != ctx.handles[slot]) {
-                std.log.warn("used out of date handle in addTypes", .{});
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
                 return;
-            }
+            };
 
             inline for (components) |component| {
-                ctx.components[@enumToInt(@as(Component, component))].unset(slot);
-                ctx.entities[slot] = undefined;
+                ctx.components[@enumToInt(@as(Component, component))].unset(_slot);
+                ctx.entities[_slot] = undefined;
             }
         }
 
         pub fn valid(ctx: *Ctx, handle: Handle) bool {
-            const slot = handle & mask_slot;
-            return handle == ctx.handles[slot];
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
+                return false;
+            };
+
+            std.debug.assert(handle == ctx.handles[_slot]);
+            return true;
         }
 
         pub fn has(ctx: *Ctx, handle: Handle, comptime component: Component) bool {
-            const slot = handle & mask_slot;
-            if (handle != ctx.handles[slot]) {
-                std.log.warn("used out of date handle in has", .{});
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
                 return false;
-            }
-            return ctx.components[@enumToInt(component)].isSet(slot);
+            };
+
+            return ctx.components[@enumToInt(component)].isSet(_slot);
+        }
+
+        pub fn get(ctx: *Ctx, handle: Handle) ?*Entity {
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
+                return null;
+            };
+
+            return &ctx.data[_slot];
         }
 
         pub fn view(ctx: *Ctx, includes: anytype, excludes: anytype) View {
@@ -216,14 +233,6 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             }
 
             return result;
-        }
-
-        pub fn get(ctx: *Ctx, handle: Handle) ?*Entity {
-            const slot = handle & mask_slot;
-            if (handle != ctx.handles[slot]) {
-                return null;
-            }
-            return &ctx.data[slot];
         }
     };
 }
