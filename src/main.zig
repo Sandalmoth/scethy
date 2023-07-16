@@ -118,6 +118,29 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             }
         }
 
+        pub fn createCopy(ctx: *Ctx, handle: Handle) !Handle {
+            const _slot = ctx.slot(handle) orelse {
+                std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
+                return error.BadCopyHandle;
+            };
+
+            if (ctx.extant.complement().findFirstSet()) |i| {
+                ctx.handles[i] += @truncate(Handle, size); // generational increment
+                ctx.extant.set(i);
+
+                for (0..n_components) |j| {
+                    if (ctx.components[j].isSet(_slot)) {
+                        ctx.components[j].set(i);
+                    }
+                }
+                ctx.data[i] = ctx.data[_slot];
+
+                return ctx.handles[i];
+            } else {
+                return error.EntityContextFull;
+            }
+        }
+
         pub fn destroy(ctx: *Ctx, handle: Handle) void {
             const _slot = ctx.slot(handle) orelse {
                 std.log.warn("used invalid handle {} in {s}", .{ handle, @src().fn_name });
@@ -126,7 +149,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
 
             ctx.extant.unset(_slot);
             for (0..n_components) |i| {
-                ctx.components[i].unset(i);
+                ctx.components[i].unset(_slot);
             }
             ctx.data[_slot] = undefined;
         }
