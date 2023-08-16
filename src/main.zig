@@ -86,7 +86,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             }
             for (0..size) |i| {
                 ctx.data[i] = undefined;
-                ctx.handles[i] = @truncate(Handle, i);
+                ctx.handles[i] = @as(Handle, @truncate(i));
             }
 
             return ctx;
@@ -110,7 +110,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
 
         pub fn create(ctx: *Ctx) !Handle {
             if (ctx.extant.complement().findFirstSet()) |i| {
-                ctx.handles[i] += @truncate(Handle, size); // generational increment
+                ctx.handles[i] += @as(Handle, @truncate(size)); // generational increment
                 ctx.extant.set(i);
                 return ctx.handles[i];
             } else {
@@ -125,7 +125,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             };
 
             if (ctx.extant.complement().findFirstSet()) |i| {
-                ctx.handles[i] += @truncate(Handle, size); // generational increment
+                ctx.handles[i] += @as(Handle, @truncate(size)); // generational increment
                 ctx.extant.set(i);
 
                 for (0..n_components) |j| {
@@ -167,7 +167,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
                 ctx.data[_slot],
                 std.meta.fieldInfo(Entity, component).name,
             ) = value;
-            ctx.components[@enumToInt(component)].set(_slot);
+            ctx.components[@intFromEnum(component)].set(_slot);
         }
 
         pub fn addTypes(ctx: *Ctx, handle: Handle, components: anytype) void {
@@ -177,7 +177,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             };
 
             inline for (components) |component| {
-                ctx.components[@enumToInt(@as(Component, component))].set(_slot);
+                ctx.components[@intFromEnum(@as(Component, component))].set(_slot);
                 ctx.entities[_slot] = std.mem.zeroes(std.meta.fieldInfo(Entity, @as(Component, component)).type);
             }
         }
@@ -193,7 +193,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
                 ctx.data[_slot],
                 std.meta.fieldInfo(Entity, component).name,
             ) = undefined;
-            ctx.components[@enumToInt(component)].unset(_slot);
+            ctx.components[@intFromEnum(component)].unset(_slot);
         }
 
         pub fn removeTypes(ctx: *Ctx, handle: Handle, components: anytype) void {
@@ -203,7 +203,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
             };
 
             inline for (components) |component| {
-                ctx.components[@enumToInt(@as(Component, component))].unset(_slot);
+                ctx.components[@intFromEnum(@as(Component, component))].unset(_slot);
                 ctx.entities[_slot] = undefined;
             }
         }
@@ -224,7 +224,7 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
                 return false;
             };
 
-            return ctx.components[@enumToInt(component)].isSet(_slot);
+            return ctx.components[@intFromEnum(component)].isSet(_slot);
         }
 
         pub fn get(ctx: *Ctx, handle: Handle) ?*Entity {
@@ -245,13 +245,13 @@ pub fn Context(comptime Entity: type, comptime options: Options) type {
 
             inline for (includes) |component| {
                 result.mask.setIntersection(
-                    ctx.components[@enumToInt(@as(Component, component))],
+                    ctx.components[@intFromEnum(@as(Component, component))],
                 );
             }
 
             inline for (excludes) |component| {
                 result.mask.setIntersection(
-                    ctx.components[@enumToInt(@as(Component, component))].complement(),
+                    ctx.components[@intFromEnum(@as(Component, component))].complement(),
                 );
             }
 
@@ -326,7 +326,7 @@ test "basics" {
     std.debug.print("modifying entities with b\n", .{});
     view_b.reset();
     while (view_b.next()) |entity| {
-        entity.b += @splat(4, @as(f32, 0.5));
+        entity.b += @splat(0.5);
     }
 
     std.debug.print("entities with b without a\n", .{});
