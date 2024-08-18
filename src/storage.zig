@@ -164,6 +164,28 @@ const Bucket = struct {
         }
     }
 
+    fn getConstPtr(bucket: *Bucket, comptime V: type, page_index: *PageIndex, key: Entity) ?*const V {
+        const h = hash(key);
+        const fingerprint: u8 = @intCast(h >> 24);
+        for (0..capacity) |probe| {
+            const ix = (h + probe) % capacity;
+            const l = bucket.locs[ix];
+            if (l.index == ix_nil) break;
+            if (l.fingerprint == fingerprint) {
+                const k = page_index.pages[l.page].?.head.keys[l.index];
+                if (k == key) {
+                    return &page_index.pages[l.page].?.head.vals(V)[l.index];
+                }
+            }
+        }
+
+        if (bucket.head.next) |next| {
+            return next.getConstPtr(V, page_index, key);
+        } else {
+            return null;
+        }
+    }
+
     /// returns whether a deletion was made
     fn del(
         bucket: *Bucket,
@@ -485,6 +507,13 @@ pub const DataStorage = struct {
         if (key == nil) return null;
         const bucket_ix = storage.bucketIndex(key);
         return storage.bucket_index.buckets[bucket_ix].?.getPtr(V, storage.page_index, key);
+    }
+
+    pub fn getConstPtr(storage: *DataStorage, comptime V: type, key: Entity) ?*const V {
+        if (storage.n_buckets == 0) return null;
+        if (key == nil) return null;
+        const bucket_ix = storage.bucketIndex(key);
+        return storage.bucket_index.buckets[bucket_ix].?.getConstPtr(V, storage.page_index, key);
     }
 
     /// noop if present (returns false), true means key was added
