@@ -316,7 +316,7 @@ const Page = struct {
             ._vals = undefined,
             .capacity = @min(
                 page.bytes.len / (@sizeOf(Entity) + @sizeOf(V)),
-                8191, // make room for ix_nil in bucket
+                4095, // make room for ix_nil in bucket
             ),
             .len = 0,
             .modified = false,
@@ -368,7 +368,7 @@ const Page = struct {
 };
 
 const BUCKET_INDEX_SIZE = Pool.BLOCK_SIZE / @sizeOf(usize);
-const PAGE_INDEX_SIZE = @min(Pool.BLOCK_SIZE / @sizeOf(usize), 8192);
+const PAGE_INDEX_SIZE = @min(Pool.BLOCK_SIZE / @sizeOf(usize), 4096);
 
 const BucketIndex = struct {
     buckets: [BUCKET_INDEX_SIZE]?*Bucket,
