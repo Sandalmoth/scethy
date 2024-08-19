@@ -537,9 +537,13 @@ pub const DataStorage = struct {
             .static => storage.n_pages_static - 1,
             .dynamic => storage.n_pages_dynamic - 1 + PAGE_INDEX_SIZE / 2,
         };
-        const index = storage.page_index.pages[page].?.push(V, key, val);
+        const index = storage.page_index.pages[page].?.head.len;
+        // const index = storage.page_index.pages[page].?.push(V, key, val);
         const success = storage.bucketIns(key, page, index);
-        if (success) storage.len += 1;
+        if (success) {
+            storage.len += 1;
+            _ = storage.page_index.pages[page].?.push(V, key, val);
+        }
         return success;
     }
 
@@ -602,36 +606,33 @@ pub const DataStorage = struct {
         return true;
     }
 
-    const Iterator = struct {
+    const EntityIterator = struct {
         storage: *DataStorage,
+        keys: [*]Entity,
         page_cursor: usize,
         index_cursor: usize,
 
-        pub fn next(it: *Iterator) ?Entity {
+        pub fn next(it: *EntityIterator) ?Entity {
             if (it.index_cursor == 0) {
-                if (it.page_cursor == 0) {
-                    return null;
-                } else {
-                    it.page_cursor -= 1;
-                    // TODO
-                    // i don't love the skip-by-null thing here
-                    // would be nicer if we kept a static/dynamic page_cursor
-                    // and did each of them
-                    while (it.page_cursor > 0 and
-                        it.storage.page_index[it.page_cursor] == null) : (it.page_cursor -= 1)
-                    {}
-                    it.index_cursor = it.storage.page_index.pages[it.page_cursor].?.head.len;
-                    if (it.index_cursor == 0) return null;
+                if (it.page_cursor == PAGE_INDEX_SIZE / 2) {
+                    it.page_cursor = it.storage.n_pages_static;
                 }
+                if (it.page_cursor == 0) return null;
+
+                it.page_cursor -= 1;
+                it.index_cursor = it.storage.page_index.pages[it.page_cursor].?.head.len;
+                it.keys = it.storage.page_index.pages[it.page_cursor].?.head.keys;
             }
+
             it.index_cursor -= 1;
-            return it.storage.page_index.pages[it.page_cursor].?.head.keys[it.index_cursor];
+            return it.keys[it.index_cursor];
         }
     };
 
-    pub fn iterator(storage: *DataStorage) Iterator {
+    pub fn entityIterator(storage: *DataStorage) EntityIterator {
         return .{
             .storage = storage,
+            .keys = undefined,
             .page_cursor = storage.n_pages_dynamic + PAGE_INDEX_SIZE / 2,
             .index_cursor = 0,
         };
@@ -832,9 +833,13 @@ pub const DataStorage = struct {
             std.debug.print(" bkt", .{});
             storage.bucket_index.buckets[i].?.debugPrint(storage.page_index);
         }
-        for (0..storage.n_pages) |i| {
+        for (0..storage.n_pages_static) |i| {
             std.debug.print(" {:>3}", .{i});
             storage.page_index.pages[i].?.debugPrint(V);
+        }
+        for (0..storage.n_pages_dynamic) |i| {
+            std.debug.print(" {:>3}", .{i + PAGE_INDEX_SIZE / 2});
+            storage.page_index.pages[i + PAGE_INDEX_SIZE / 2].?.debugPrint(V);
         }
     }
 };
@@ -843,13 +848,28 @@ test "storage interface" {
     var p = Pool.init(std.testing.allocator);
     var s = DataStorage.init(&p);
     defer s.deinit();
+
     try std.testing.expect(s.getPtr(u8, 1) == null);
     try std.testing.expect(s.ins(u8, 1, 0, .static));
-    try std.testing.expect(!s.ins(u8, 1, 0, .static));
+    try std.testing.expect(!s.ins(u8, 1, 1, .static));
     try std.testing.expect(s.getPtr(u8, 1) != null);
+    try std.testing.expectEqual(0, s.getPtr(u8, 1).?.*);
+    try std.testing.expectEqual(0, s.getConstPtr(u8, 1).?.*);
     try std.testing.expect(s.del(u8, 1));
     try std.testing.expect(!s.del(u8, 1));
     try std.testing.expect(s.getPtr(u8, 1) == null);
+
+    _ = s.ins(u8, 1, 1, .static);
+    _ = s.ins(u8, 2, 2, .dynamic);
+    _ = s.ins(u8, 3, 3, .static);
+    _ = s.ins(u8, 4, 4, .dynamic);
+    var it = s.entityIterator();
+    // NOTE order is dynamic before static
+    try std.testing.expectEqual(4, it.next().?);
+    try std.testing.expectEqual(2, it.next().?);
+    try std.testing.expectEqual(3, it.next().?);
+    try std.testing.expectEqual(1, it.next().?);
+    try std.testing.expectEqual(null, it.next());
 }
 
 test "storage fuzz (no copy)" {
