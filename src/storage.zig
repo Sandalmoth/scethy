@@ -613,7 +613,7 @@ pub const DataStorage = struct {
         index_cursor: usize,
 
         pub fn next(it: *EntityIterator) ?Entity {
-            if (it.index_cursor == 0) {
+            while (it.index_cursor == 0) {
                 if (it.page_cursor == PAGE_INDEX_SIZE / 2) {
                     it.page_cursor = it.storage.n_pages_static;
                 }
@@ -990,5 +990,124 @@ test "storage fuzz (with copy)" {
 
         s.deinit();
         h.deinit();
+    }
+}
+
+test "storage fuzz (no copy) v2" {
+    var p = Pool.init(std.testing.allocator);
+    var s = DataStorage.init(&p);
+    defer s.deinit();
+    var h = std.AutoHashMap(Entity, u32).init(std.testing.allocator);
+    defer h.deinit();
+
+    var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+    var rand = rng.random();
+
+    for (0..65536) |_| {
+        {
+            const k = (rand.int(Entity) & 4096) | 1;
+            const v: u32 = @intCast(k);
+            const success = s.ins(u32, k, v, .static);
+            if (success) try h.put(k, v);
+        }
+        {
+            const k = (rand.int(Entity) & 4096) | 1;
+            const v: u32 = @intCast(k);
+            const success = s.ins(u32, k, v, .dynamic);
+            if (success) try h.put(k, v);
+        }
+        {
+            const k = (rand.int(Entity) & 4096) | 1;
+            const ss = s.del(u32, k);
+            const hs = h.remove(k);
+            try std.testing.expect(ss == hs);
+        }
+
+        var acc_s: u32 = 0;
+        var acc_h: u32 = 0;
+
+        var sit = s.entityIterator();
+        while (sit.next()) |k| {
+            const v = s.getConstPtr(u32, k).?.*;
+            acc_s +%= v;
+        }
+        var hit = h.keyIterator();
+        while (hit.next()) |k| {
+            const v = h.get(k.*).?;
+            acc_h +%= v;
+        }
+        try std.testing.expect(acc_s == acc_h);
+    }
+}
+
+test "storage fuzz (copy) v2" {
+    var p = Pool.init(std.testing.allocator);
+    var s = DataStorage.init(&p);
+    defer s.deinit();
+    var h = std.AutoHashMap(Entity, u32).init(std.testing.allocator);
+    defer h.deinit();
+
+    var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+    var rand = rng.random();
+
+    for (0..256) |_| {
+        var spre = s.copy(u32);
+        defer spre.deinit();
+        var hpre = try h.clone();
+        defer hpre.deinit();
+
+        for (0..256) |_| {
+            {
+                const k = (rand.int(Entity) & 4096) | 1;
+                const v: u32 = @intCast(k);
+                const success = s.ins(u32, k, v, .static);
+                if (success) try h.put(k, v);
+            }
+            {
+                const k = (rand.int(Entity) & 4096) | 1;
+                const v: u32 = @intCast(k);
+                const success = s.ins(u32, k, v, .dynamic);
+                if (success) try h.put(k, v);
+            }
+            {
+                const k = (rand.int(Entity) & 4096) | 1;
+                const ss = s.del(u32, k);
+                const hs = h.remove(k);
+                try std.testing.expect(ss == hs);
+            }
+        }
+
+        {
+            var acc_s: u32 = 0;
+            var acc_h: u32 = 0;
+
+            var sit = spre.entityIterator();
+            while (sit.next()) |k| {
+                const v = spre.getConstPtr(u32, k).?.*;
+                acc_s +%= v;
+            }
+            var hit = hpre.keyIterator();
+            while (hit.next()) |k| {
+                const v = hpre.get(k.*).?;
+                acc_h +%= v;
+            }
+            try std.testing.expect(acc_s == acc_h);
+        }
+        {
+            var acc_s: u32 = 0;
+            var acc_h: u32 = 0;
+
+            var sit = s.entityIterator();
+            while (sit.next()) |k| {
+                const v = s.getConstPtr(u32, k).?.*;
+                acc_s +%= v;
+            }
+            var hit = h.keyIterator();
+            while (hit.next()) |k| {
+                const v = h.get(k.*).?;
+                acc_h +%= v;
+            }
+            try std.testing.expect(acc_s == acc_h);
+        }
     }
 }
