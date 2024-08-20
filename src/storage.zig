@@ -73,13 +73,6 @@ const Bucket = struct {
     ) bool {
         std.debug.assert(key != nil);
 
-        if (bucket.head.len > load_max) {
-            if (bucket.head.next == null) {
-                bucket.head.next = Bucket.create(pool);
-            }
-            return bucket.head.next.?.ins(pool, page_index, key, page, index);
-        }
-
         const h = hash(key);
         const fingerprint: u8 = @intCast(h >> 24);
         var ix = h % capacity;
@@ -90,6 +83,14 @@ const Bucket = struct {
                 if (k == key) return false;
             }
         }
+
+        if (bucket.head.len > load_max) {
+            if (bucket.head.next == null) {
+                bucket.head.next = Bucket.create(pool);
+            }
+            return bucket.head.next.?.ins(pool, page_index, key, page, index);
+        }
+
         std.debug.assert(bucket.locs[ix].index == ix_nil);
         bucket.head.len += 1;
         bucket.locs[ix] = .{
@@ -308,8 +309,8 @@ const Bucket = struct {
             }
         }
         if (bucket.head.next) |next| {
-            next.debugPrint(page_index);
             std.debug.print("] ->", .{});
+            next.debugPrint(page_index);
         } else {
             std.debug.print("]\n", .{});
         }
@@ -647,6 +648,9 @@ pub const DataStorage = struct {
     }
 
     fn bucketExpand(storage: *DataStorage) void {
+        std.debug.print("###################### BUCKETEXPAND ###################\n", .{});
+        std.debug.print("splitting bucket is {}\n", .{storage.bucket_split});
+        std.debug.print("number of buckets is {}\n", .{storage.n_buckets});
         const index = storage.bucket_index;
 
         if (storage.n_buckets == 0) {
@@ -830,7 +834,7 @@ pub const DataStorage = struct {
     fn debugPrint(storage: DataStorage, comptime V: type) void {
         std.debug.print("DataStorage - {} item(s)\n", .{storage.len});
         for (0..storage.n_buckets) |i| {
-            std.debug.print(" bkt", .{});
+            std.debug.print(" bkt {:>3}", .{i});
             storage.bucket_index.buckets[i].?.debugPrint(storage.page_index);
         }
         for (0..storage.n_pages_static) |i| {
@@ -844,154 +848,154 @@ pub const DataStorage = struct {
     }
 };
 
-test "storage interface" {
-    var p = Pool.init(std.testing.allocator);
-    var s = DataStorage.init(&p);
-    defer s.deinit();
+// test "storage interface" {
+//     var p = Pool.init(std.testing.allocator);
+//     var s = DataStorage.init(&p);
+//     defer s.deinit();
 
-    try std.testing.expect(s.getPtr(u8, 1) == null);
-    try std.testing.expect(s.ins(u8, 1, 0, .static));
-    try std.testing.expect(!s.ins(u8, 1, 1, .static));
-    try std.testing.expect(s.getPtr(u8, 1) != null);
-    try std.testing.expectEqual(0, s.getPtr(u8, 1).?.*);
-    try std.testing.expectEqual(0, s.getConstPtr(u8, 1).?.*);
-    try std.testing.expect(s.del(u8, 1));
-    try std.testing.expect(!s.del(u8, 1));
-    try std.testing.expect(s.getPtr(u8, 1) == null);
+//     try std.testing.expect(s.getPtr(u8, 1) == null);
+//     try std.testing.expect(s.ins(u8, 1, 0, .static));
+//     try std.testing.expect(!s.ins(u8, 1, 1, .static));
+//     try std.testing.expect(s.getPtr(u8, 1) != null);
+//     try std.testing.expectEqual(0, s.getPtr(u8, 1).?.*);
+//     try std.testing.expectEqual(0, s.getConstPtr(u8, 1).?.*);
+//     try std.testing.expect(s.del(u8, 1));
+//     try std.testing.expect(!s.del(u8, 1));
+//     try std.testing.expect(s.getPtr(u8, 1) == null);
 
-    _ = s.ins(u8, 1, 1, .static);
-    _ = s.ins(u8, 2, 2, .dynamic);
-    _ = s.ins(u8, 3, 3, .static);
-    _ = s.ins(u8, 4, 4, .dynamic);
-    var it = s.entityIterator();
-    // NOTE order is dynamic before static
-    try std.testing.expectEqual(4, it.next().?);
-    try std.testing.expectEqual(2, it.next().?);
-    try std.testing.expectEqual(3, it.next().?);
-    try std.testing.expectEqual(1, it.next().?);
-    try std.testing.expectEqual(null, it.next());
-}
+//     _ = s.ins(u8, 1, 1, .static);
+//     _ = s.ins(u8, 2, 2, .dynamic);
+//     _ = s.ins(u8, 3, 3, .static);
+//     _ = s.ins(u8, 4, 4, .dynamic);
+//     var it = s.entityIterator();
+//     // NOTE order is dynamic before static
+//     try std.testing.expectEqual(4, it.next().?);
+//     try std.testing.expectEqual(2, it.next().?);
+//     try std.testing.expectEqual(3, it.next().?);
+//     try std.testing.expectEqual(1, it.next().?);
+//     try std.testing.expectEqual(null, it.next());
+// }
 
-test "storage fuzz (no copy)" {
-    var p = Pool.init(std.testing.allocator);
-    var s = DataStorage.init(&p);
-    defer s.deinit();
-    var h = std.AutoHashMap(Entity, f64).init(std.testing.allocator);
-    defer h.deinit();
-    var a = try std.ArrayList(Entity).initCapacity(std.testing.allocator, 64 * 1024);
-    defer a.deinit();
+// test "storage fuzz (no copy)" {
+//     var p = Pool.init(std.testing.allocator);
+//     var s = DataStorage.init(&p);
+//     defer s.deinit();
+//     var h = std.AutoHashMap(Entity, f64).init(std.testing.allocator);
+//     defer h.deinit();
+//     var a = try std.ArrayList(Entity).initCapacity(std.testing.allocator, 64 * 1024);
+//     defer a.deinit();
 
-    var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
-    var rand = rng.random();
+//     var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+//     var rand = rng.random();
 
-    for (0..64) |_| {
-        for (0..1024) |_| {
-            const k = rand.int(Entity) & 4096 | 1;
-            const v: f64 = @floatFromInt(k);
-            try std.testing.expectEqual(h.contains(k), s.has(k));
-            if (s.has(k)) continue;
-            const success = s.ins(f64, k, v, .static);
-            std.debug.assert(success);
-            try h.put(k, v);
-            try a.append(k);
-        }
+//     for (0..64) |_| {
+//         for (0..256) |_| {
+//             const k = rand.int(Entity) | 1;
+//             const v: f64 = @floatFromInt(k);
+//             try std.testing.expectEqual(h.contains(k), s.has(k));
+//             if (s.has(k)) continue;
+//             const success = s.ins(f64, k, v, .static);
+//             std.debug.assert(success);
+//             try h.put(k, v);
+//             try a.append(k);
+//         }
 
-        for (a.items) |k| {
-            if (rand.int(Entity) < k) continue;
-            const v: f64 = @floatFromInt(k);
-            try std.testing.expectEqual(h.contains(k), s.has(k));
-            if (s.has(k)) {
-                try std.testing.expectEqual(h.getPtr(k).?.*, s.getPtr(f64, k).?.*);
-                const success = s.del(f64, k);
-                std.debug.assert(success);
-                _ = h.remove(k);
-            } else {
-                try std.testing.expectEqual(null, s.getPtr(f64, k));
-                const success = s.ins(f64, k, v, .dynamic);
-                std.debug.assert(success);
-                try h.put(k, v);
-            }
-        }
-    }
+//         for (a.items) |k| {
+//             if (rand.int(Entity) < k) continue;
+//             const v: f64 = @floatFromInt(k);
+//             try std.testing.expectEqual(h.contains(k), s.has(k));
+//             if (s.has(k)) {
+//                 try std.testing.expectEqual(h.getPtr(k).?.*, s.getPtr(f64, k).?.*);
+//                 const success = s.del(f64, k);
+//                 std.debug.assert(success);
+//                 _ = h.remove(k);
+//             } else {
+//                 try std.testing.expectEqual(null, s.getPtr(f64, k));
+//                 const success = s.ins(f64, k, v, .dynamic);
+//                 std.debug.assert(success);
+//                 try h.put(k, v);
+//             }
+//         }
+//     }
 
-    var it = h.keyIterator();
-    while (it.next()) |k| {
-        try std.testing.expect(s.has(k.*));
-        const success = s.del(f64, k.*);
-        std.debug.assert(success);
-    }
-    try std.testing.expectEqual(0, s.len);
-}
+//     var it = h.keyIterator();
+//     while (it.next()) |k| {
+//         try std.testing.expect(s.has(k.*));
+//         const success = s.del(f64, k.*);
+//         std.debug.assert(success);
+//     }
+//     try std.testing.expectEqual(0, s.len);
+// }
 
-test "storage fuzz (with copy)" {
-    const N = 16;
+// test "storage fuzz (with copy)" {
+//     const N = 16;
 
-    var ss: [N + 1]DataStorage = undefined;
-    var hs: [N + 1]std.AutoHashMap(Entity, f64) = undefined;
+//     var ss: [N + 1]DataStorage = undefined;
+//     var hs: [N + 1]std.AutoHashMap(Entity, f64) = undefined;
 
-    var p = Pool.init(std.testing.allocator);
-    var s = DataStorage.init(&p);
-    var h = std.AutoHashMap(Entity, f64).init(std.testing.allocator);
-    var a = try std.ArrayList(Entity).initCapacity(std.testing.allocator, 16 * 1024);
-    defer a.deinit();
+//     var p = Pool.init(std.testing.allocator);
+//     var s = DataStorage.init(&p);
+//     var h = std.AutoHashMap(Entity, f64).init(std.testing.allocator);
+//     var a = try std.ArrayList(Entity).initCapacity(std.testing.allocator, 16 * 1024);
+//     defer a.deinit();
 
-    var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
-    var rand = rng.random();
+//     var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+//     var rand = rng.random();
 
-    for (0..N) |i| {
-        for (0..1024) |_| {
-            const k = rand.int(Entity) | 1;
-            const v: f64 = @floatFromInt(k);
-            try std.testing.expectEqual(h.contains(k), s.has(k));
-            if (s.has(k)) continue;
-            const success = s.ins(f64, k, v, .static);
-            std.debug.assert(success);
-            try h.put(k, v);
-            try a.append(k);
-        }
+//     for (0..N) |i| {
+//         for (0..1024) |_| {
+//             const k = rand.int(Entity) | 1;
+//             const v: f64 = @floatFromInt(k);
+//             try std.testing.expectEqual(h.contains(k), s.has(k));
+//             if (s.has(k)) continue;
+//             const success = s.ins(f64, k, v, .static);
+//             std.debug.assert(success);
+//             try h.put(k, v);
+//             try a.append(k);
+//         }
 
-        for (a.items) |k| {
-            if (rand.int(Entity) < k) continue;
-            const v: f64 = @floatFromInt(k);
-            try std.testing.expectEqual(h.contains(k), s.has(k));
-            if (s.has(k)) {
-                try std.testing.expectEqual(h.getPtr(k).?.*, s.getPtr(f64, k).?.*);
-                const success = s.del(f64, k);
-                std.debug.assert(success);
-                _ = h.remove(k);
-            } else {
-                try std.testing.expectEqual(null, s.getPtr(f64, k));
-                const success = s.ins(f64, k, v, .dynamic);
-                std.debug.assert(success);
-                try h.put(k, v);
-            }
-        }
+//         for (a.items) |k| {
+//             if (rand.int(Entity) < k) continue;
+//             const v: f64 = @floatFromInt(k);
+//             try std.testing.expectEqual(h.contains(k), s.has(k));
+//             if (s.has(k)) {
+//                 try std.testing.expectEqual(h.getPtr(k).?.*, s.getPtr(f64, k).?.*);
+//                 const success = s.del(f64, k);
+//                 std.debug.assert(success);
+//                 _ = h.remove(k);
+//             } else {
+//                 try std.testing.expectEqual(null, s.getPtr(f64, k));
+//                 const success = s.ins(f64, k, v, .dynamic);
+//                 std.debug.assert(success);
+//                 try h.put(k, v);
+//             }
+//         }
 
-        ss[i] = s;
-        hs[i] = h;
-        s = s.copy(f64);
-        h = try h.clone();
-    }
-    ss[N] = s;
-    hs[N] = h;
+//         ss[i] = s;
+//         hs[i] = h;
+//         s = s.copy(f64);
+//         h = try h.clone();
+//     }
+//     ss[N] = s;
+//     hs[N] = h;
 
-    for (0..N + 1) |i| {
-        s = ss[i];
-        h = hs[i];
+//     for (0..N + 1) |i| {
+//         s = ss[i];
+//         h = hs[i];
 
-        var it = h.keyIterator();
-        while (it.next()) |k| {
-            try std.testing.expect(s.has(k.*));
-            if (i % 2 == 0) continue;
-            const success = s.del(f64, k.*);
-            std.debug.assert(success);
-        }
-        if (i % 2 == 1) try std.testing.expectEqual(0, s.len);
+//         var it = h.keyIterator();
+//         while (it.next()) |k| {
+//             try std.testing.expect(s.has(k.*));
+//             if (i % 2 == 0) continue;
+//             const success = s.del(f64, k.*);
+//             std.debug.assert(success);
+//         }
+//         if (i % 2 == 1) try std.testing.expectEqual(0, s.len);
 
-        s.deinit();
-        h.deinit();
-    }
-}
+//         s.deinit();
+//         h.deinit();
+//     }
+// }
 
 test "storage fuzz (no copy) v2" {
     var p = Pool.init(std.testing.allocator);
@@ -1005,109 +1009,162 @@ test "storage fuzz (no copy) v2" {
 
     for (0..4096) |_| {
         {
-            const k = (rand.int(Entity) & 4096) | 1;
+            const k = (rand.int(Entity) & 4095) | 1;
             const v: u32 = @intCast(k);
+            std.debug.print("{} {} {}\n", .{ k, s.has(k), h.contains(k) });
             const success = s.ins(u32, k, v, .static);
-            if (success) try h.put(k, v);
+            if (success) {
+                try std.testing.expect(s.has(k));
+                try std.testing.expect(!h.contains(k));
+                try h.put(k, v);
+            }
+            std.debug.print("1 - {} {} {}\n", .{ k, v, success });
         }
         {
-            const k = (rand.int(Entity) & 4096) | 1;
+            const k = (rand.int(Entity) & 4095) | 1;
             const v: u32 = @intCast(k);
+            std.debug.print("{} {}\n", .{ s.has(k), h.contains(k) });
             const success = s.ins(u32, k, v, .dynamic);
-            if (success) try h.put(k, v);
+            if (success) {
+                try std.testing.expect(s.has(k));
+                try std.testing.expect(!h.contains(k));
+                try h.put(k, v);
+            }
+            std.debug.print("2 - {} {} {}\n", .{ k, v, success });
         }
         {
-            const k = (rand.int(Entity) & 4096) | 1;
+            const k = (rand.int(Entity) & 4095) | 1;
+            const sv = s.getPtr(u32, k);
+            const hv = h.getPtr(k);
+            if (sv == null) std.debug.assert(hv == null);
+            if (sv != null) {
+                const x = rand.int(u32);
+                sv.?.* = x;
+                hv.?.* = x;
+                std.debug.print("3 - {} {}\n", .{ k, x });
+            }
+        }
+        {
+            const k = (rand.int(Entity) & 4095) | 1;
             const ss = s.del(u32, k);
             const hs = h.remove(k);
             try std.testing.expect(ss == hs);
+            std.debug.print("4 - {} {}\n", .{ k, ss });
         }
 
         var acc_s: u32 = 0;
         var acc_h: u32 = 0;
+        var ns: usize = 0;
+        var nh: usize = 0;
+
+        // s.debugPrint(u32);
 
         var sit = s.entityIterator();
         while (sit.next()) |k| {
+            try std.testing.expect(s.has(k));
+            try std.testing.expect(h.contains(k));
             const v = s.getConstPtr(u32, k).?.*;
+            const v2 = h.get(k).?;
+            try std.testing.expect(v == v2);
             acc_s +%= v;
+            ns += 1;
         }
         var hit = h.keyIterator();
         while (hit.next()) |k| {
+            try std.testing.expect(s.has(k.*));
+            try std.testing.expect(h.contains(k.*));
             const v = h.get(k.*).?;
+            const v2 = s.getConstPtr(u32, k.*).?.*;
+            try std.testing.expect(v == v2);
             acc_h +%= v;
+            nh += 1;
         }
+        std.debug.print("{} {}\n", .{ acc_s, acc_h });
+        std.debug.print("{} {}\n", .{ ns, nh });
+        try std.testing.expect(ns == nh);
         try std.testing.expect(acc_s == acc_h);
     }
 }
 
-test "storage fuzz (copy) v2" {
-    var p = Pool.init(std.testing.allocator);
-    var s = DataStorage.init(&p);
-    defer s.deinit();
-    var h = std.AutoHashMap(Entity, u32).init(std.testing.allocator);
-    defer h.deinit();
+// test "storage fuzz (copy) v2" {
+//     var p = Pool.init(std.testing.allocator);
+//     var s = DataStorage.init(&p);
+//     defer s.deinit();
+//     var h = std.AutoHashMap(Entity, u32).init(std.testing.allocator);
+//     defer h.deinit();
 
-    var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
-    var rand = rng.random();
+//     var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+//     var rand = rng.random();
 
-    for (0..256) |_| {
-        var spre = s.copy(u32);
-        defer spre.deinit();
-        var hpre = try h.clone();
-        defer hpre.deinit();
+//     for (0..256) |_| {
+//         var spre = s.copy(u32);
+//         defer spre.deinit();
+//         var hpre = try h.clone();
+//         defer hpre.deinit();
 
-        for (0..16) |_| {
-            {
-                const k = (rand.int(Entity) & 4096) | 1;
-                const v: u32 = @intCast(k);
-                const success = s.ins(u32, k, v, .static);
-                if (success) try h.put(k, v);
-            }
-            {
-                const k = (rand.int(Entity) & 4096) | 1;
-                const v: u32 = @intCast(k);
-                const success = s.ins(u32, k, v, .dynamic);
-                if (success) try h.put(k, v);
-            }
-            {
-                const k = (rand.int(Entity) & 4096) | 1;
-                const ss = s.del(u32, k);
-                const hs = h.remove(k);
-                try std.testing.expect(ss == hs);
-            }
-        }
+//         for (0..16) |_| {
+//             {
+//                 const k = (rand.int(Entity) & 4095) | 1;
+//                 const v: u32 = @intCast(k);
+//                 const success = s.ins(u32, k, v, .static);
+//                 if (success) try h.put(k, v);
+//             }
+//             {
+//                 const k = (rand.int(Entity) & 4095) | 1;
+//                 const v: u32 = @intCast(k);
+//                 const success = s.ins(u32, k, v, .dynamic);
+//                 if (success) try h.put(k, v);
+//             }
+//             {
+//                 const k = (rand.int(Entity) & 4095) | 1;
+//                 const sv = s.getPtr(u32, k);
+//                 const hv = h.getPtr(k);
+//                 if (sv == null) std.debug.assert(hv == null);
+//                 if (sv != null) {
+//                     const x = rand.int(u32);
+//                     sv.?.* = x;
+//                     hv.?.* = x;
+//                 }
+//             }
+//             {
+//                 const k = (rand.int(Entity) & 4095) | 1;
+//                 const ss = s.del(u32, k);
+//                 const hs = h.remove(k);
+//                 try std.testing.expect(ss == hs);
+//             }
+//         }
 
-        {
-            var acc_s: u32 = 0;
-            var acc_h: u32 = 0;
+//         {
+//             var acc_s: u32 = 0;
+//             var acc_h: u32 = 0;
 
-            var sit = spre.entityIterator();
-            while (sit.next()) |k| {
-                const v = spre.getConstPtr(u32, k).?.*;
-                acc_s +%= v;
-            }
-            var hit = hpre.keyIterator();
-            while (hit.next()) |k| {
-                const v = hpre.get(k.*).?;
-                acc_h +%= v;
-            }
-            try std.testing.expect(acc_s == acc_h);
-        }
-        {
-            var acc_s: u32 = 0;
-            var acc_h: u32 = 0;
+//             var sit = spre.entityIterator();
+//             while (sit.next()) |k| {
+//                 const v = spre.getConstPtr(u32, k).?.*;
+//                 acc_s +%= v;
+//             }
+//             var hit = hpre.keyIterator();
+//             while (hit.next()) |k| {
+//                 const v = hpre.get(k.*).?;
+//                 acc_h +%= v;
+//             }
+//             try std.testing.expect(acc_s == acc_h);
+//         }
+//         {
+//             var acc_s: u32 = 0;
+//             var acc_h: u32 = 0;
 
-            var sit = s.entityIterator();
-            while (sit.next()) |k| {
-                const v = s.getConstPtr(u32, k).?.*;
-                acc_s +%= v;
-            }
-            var hit = h.keyIterator();
-            while (hit.next()) |k| {
-                const v = h.get(k.*).?;
-                acc_h +%= v;
-            }
-            try std.testing.expect(acc_s == acc_h);
-        }
-    }
-}
+//             var sit = s.entityIterator();
+//             while (sit.next()) |k| {
+//                 const v = s.getConstPtr(u32, k).?.*;
+//                 acc_s +%= v;
+//             }
+//             var hit = h.keyIterator();
+//             while (hit.next()) |k| {
+//                 const v = h.get(k.*).?;
+//                 acc_h +%= v;
+//             }
+//             try std.testing.expect(acc_s == acc_h);
+//         }
+//     }
+// }

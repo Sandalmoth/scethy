@@ -125,10 +125,29 @@ pub fn Table(comptime Vs: type, comptime Is: type) type {
             _ = e;
         }
 
-        pub fn add(table: *Self, comptime c: Component, e: Entity, val: ComponentType(c)) void {
+        pub fn ins(
+            table: *Self,
+            comptime c: Component,
+            hint: Hint,
+            e: Entity,
+            val: ComponentType(c),
+        ) void {
             _ = table;
             _ = e;
             _ = val;
+            _ = hint;
+        }
+
+        pub fn insInterface(
+            table: *Self,
+            comptime c: Component,
+            e: Entity,
+            Impl: type,
+        ) void {
+            _ = table;
+            _ = c;
+            _ = e;
+            _ = Impl;
         }
 
         pub fn del(table: *Self, comptime c: Component, e: Entity) void {
@@ -137,7 +156,16 @@ pub fn Table(comptime Vs: type, comptime Is: type) type {
             _ = e;
         }
 
-        pub fn get(table: *Self, comptime c: Component, e: Entity) ?*ComponentType(c) {
+        pub fn getPtr(table: *Self, comptime c: Component, e: Entity) ?*ComponentType(c) {
+            _ = table;
+            _ = e;
+        }
+
+        pub fn getConstPtr(
+            table: *Self,
+            comptime c: Component,
+            e: Entity,
+        ) ?*const ComponentType(c) {
             _ = table;
             _ = e;
         }
@@ -185,6 +213,13 @@ test "scratch" {
 // t.set(entity, "int", 123);
 // but this seems very inefficient
 
+// constain to enum but register properties later
+// var t = Table(<enum>).init();
+// t.register(<enum>, type, .data);
+// t.register(<enum>, type, .interface);
+// t.insI(entity, <enum>, type, value)
+// t.insD(entity, <enum>, type, )
+
 // ???
 
 // virtual component design
@@ -195,3 +230,8 @@ test "scratch" {
 // any copying of the implementation means the interfaces need updating
 // - simplest idea, scrap COW for the virtual components and always copy everything
 // - even if we mark implementation pages for edits, how can we find the matching interfaces?
+// t.getInterfacePtr(entity, component).?.update();
+
+// get*, has, could actually be the same as for the data components
+// even del could be shared if we lazy-delete (and delete only on copy)
+// however, inc does need to know the type and value of the implementation
