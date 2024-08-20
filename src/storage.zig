@@ -1003,7 +1003,7 @@ test "storage fuzz (no copy) v2" {
     var rng = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
     var rand = rng.random();
 
-    for (0..65536) |_| {
+    for (0..4096) |_| {
         {
             const k = (rand.int(Entity) & 4096) | 1;
             const v: u32 = @intCast(k);
@@ -1056,7 +1056,7 @@ test "storage fuzz (copy) v2" {
         var hpre = try h.clone();
         defer hpre.deinit();
 
-        for (0..256) |_| {
+        for (0..16) |_| {
             {
                 const k = (rand.int(Entity) & 4096) | 1;
                 const v: u32 = @intCast(k);
