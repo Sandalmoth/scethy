@@ -616,7 +616,7 @@ pub const DataStorage = struct {
         return true;
     }
 
-    const EntityIterator = struct {
+    pub const EntityIterator = struct {
         storage: *DataStorage,
         keys: [*]Entity,
         page_cursor: usize,

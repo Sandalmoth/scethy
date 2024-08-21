@@ -105,7 +105,7 @@ pub fn Table(
                 table.data_storage.getPtr(c).* = DataStorage.init(pool);
                 if (isInterface(c)) table.impl_storage.getPtr(c).* = ImplStorage.init(table.pool);
             }
-            table.entity_counter = nil + ENTITY_GENERATOR_STEP;
+            table.entity_counter = nil +% ENTITY_GENERATOR_STEP;
             return table;
         }
 
@@ -214,6 +214,73 @@ pub fn Table(
         pub fn has(table: *Self, c: Component, e: Entity) bool {
             return table.data_storage.getPtr(c).has(e);
         }
+
+        fn Query(comptime include_len: usize, comptime exclude_len: usize) type {
+            return struct {
+                const QSelf = @This();
+
+                parent: DataStorage.EntityIterator,
+                include: [include_len - 1]*DataStorage,
+                exclude: [exclude_len]*DataStorage,
+
+                pub fn next(q: *QSelf) ?Entity {
+                    loop: while (true) {
+                        const e = q.parent.next() orelse return null;
+                        for (q.include) |s| if (!s.has(e)) continue :loop;
+                        for (q.exclude) |s| if (s.has(e)) continue :loop;
+                        return e;
+                    }
+                }
+            };
+        }
+
+        pub fn query(
+            table: *Self,
+            comptime include: []const Component,
+            comptime exclude: []const Component,
+        ) Query(include.len, exclude.len) {
+            std.debug.assert(include.len > 0);
+            var include_sorted: [include.len]*DataStorage = undefined;
+            for (include, 0..) |c, i| include_sorted[i] = table.data_storage.getPtr(c);
+            var include_unsorted = true;
+            while (include_unsorted) {
+                include_unsorted = false;
+                for (1..include.len) |i| {
+                    if (include_sorted[i - 1].?.len > include_sorted[i].?.len) {
+                        const tmp = include_sorted[i];
+                        include_sorted[i] = include_sorted[i - 1];
+                        include_sorted[i - 1] = tmp;
+                        include_unsorted = true;
+                    }
+                }
+            }
+
+            var exclude_sorted: [exclude.len]*DataStorage = undefined;
+            if (exclude.len > 0) {
+                for (exclude, 0..) |c, i| exclude_sorted[i] = table.data_storage.getPtr(c);
+                var exclude_unsorted = false;
+                while (exclude_unsorted) {
+                    exclude_unsorted = true;
+                    for (1..exclude.len) |i| {
+                        if (exclude_sorted[i - 1].?.len < exclude_sorted[i].?.len) {
+                            const tmp = exclude_sorted[i];
+                            exclude_sorted[i] = exclude_sorted[i - 1];
+                            exclude_sorted[i - 1] = tmp;
+                            exclude_unsorted = true;
+                        }
+                    }
+                }
+            }
+
+            var q = Query(include.len, exclude.len){
+                .parent = include_sorted[0].entityIterator(),
+                .include = undefined,
+                .exclude = undefined,
+            };
+            if (include.len > 1) @memcpy(q.include[0..], include_sorted[1..]);
+            if (exclude.len > 0) @memcpy(q.exclude[0..], exclude_sorted[1..]);
+            return q;
+        }
     };
 }
 
@@ -301,12 +368,10 @@ test "scratch" {
     if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
     std.debug.print("{}\n", .{t.has(.int, e0)});
     std.debug.print("{}\n", .{t.has(.float, e0)});
-    t.destroy(e0);
 
     const e1 = t.create();
     _ = t.inclInterface(.behaviour, e1, B1, .{});
     t.getPtr(.behaviour, e1).?.foo();
-    t.destroy(e1);
 
     const e2 = t.create();
     _ = t.inclInterface(.behaviour, e2, B2, .{ .x = 0 });
@@ -324,42 +389,18 @@ test "scratch" {
     t.getPtr(.behaviour, e2).?.foo();
     t.getPtr(.behaviour, e2).?.foo();
 
-    t.destroy(e2);
+    var q_int = t.query(&.{.int}, &.{});
+    while (q_int.next()) |e| {
+        std.debug.print("{}\n", .{t.getPtrConst(.int, e).?.*});
+    }
+
+    var q_float = t.query(&.{.float}, &.{});
+    while (q_float.next()) |e| {
+        std.debug.print("{}\n", .{t.getPtrConst(.float, e).?.*});
+    }
+
+    var q_behaviour = t.query(&.{.behaviour}, &.{});
+    while (q_behaviour.next()) |e| {
+        t.getPtrConst(.behaviour, e).?.foo();
+    }
 }
-
-// define with struct mapping component names to types
-// var t = Table(.{.int = u32, ... });
-// t.ins(entity, .int, 123);
-// this allows for duplicate types, which could be useful
-
-// use types as a key directly
-// var t = Table{};
-// t.ins(entity, u32, 123);
-
-// stringly typed
-// var t = Table{};
-// t.set(entity, "int", 123);
-// but this seems very inefficient
-
-// constain to enum but register properties later
-// var t = Table(<enum>).init();
-// t.register(<enum>, type, .data);
-// t.register(<enum>, type, .interface);
-// t.insI(entity, <enum>, type, value)
-// t.insD(entity, <enum>, type, )
-
-// ???
-
-// virtual component design
-// const Interface = struct {.ctx: *anyopaque, vtable: *const VTable};
-// const Impl = struct {x: i32, fn inc(impl: *Impl) {impl.x += 1;}};
-// t.insv(entity, .interface, Impl, .{.x = 123});
-// but then, since we store pointers in the interfaces
-// any copying of the implementation means the interfaces need updating
-// - simplest idea, scrap COW for the virtual components and always copy everything
-// - even if we mark implementation pages for edits, how can we find the matching interfaces?
-// t.getInterfacePtr(entity, component).?.update();
-
-// get*, has, could actually be the same as for the data components
-// even del could be shared if we lazy-delete (and delete only on copy)
-// however, inc does need to know the type and value of the implementation
