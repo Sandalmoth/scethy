@@ -23,7 +23,7 @@ fn bench1(alloc: std.mem.Allocator) !void {
     const rand = rng.random();
 
     try stdout.print(
-        "n\tincl\texcl\tit123\tit12\tit1\tcpall\tcpnone\n",
+        "n\tincl\texcl\tit123\tit12\tit1\tcpall\tcpnone\tcp1\tcp2\tcp3\n",
         .{},
     );
 
@@ -110,8 +110,35 @@ fn bench1(alloc: std.mem.Allocator) !void {
         }
         const t_copynone = @as(f64, @floatFromInt(timer.lap())) * 1e-6;
 
+        {
+            var it = t.query(&.{.int1}, &.{});
+            while (it.next()) |e| t.getPtr(.int1, e).?.* += 1;
+            const t_old = t.copy();
+            t.deinit();
+            t = t_old;
+        }
+        const t_copy1 = @as(f64, @floatFromInt(timer.lap())) * 1e-6;
+
+        {
+            var it = t.query(&.{.int2}, &.{});
+            while (it.next()) |e| t.getPtr(.int2, e).?.* += 1;
+            const t_old = t.copy();
+            t.deinit();
+            t = t_old;
+        }
+        const t_copy2 = @as(f64, @floatFromInt(timer.lap())) * 1e-6;
+
+        {
+            var it = t.query(&.{.int3}, &.{});
+            while (it.next()) |e| t.getPtr(.int3, e).?.* += 1;
+            const t_old = t.copy();
+            t.deinit();
+            t = t_old;
+        }
+        const t_copy3 = @as(f64, @floatFromInt(timer.lap())) * 1e-6;
+
         try stdout.print(
-            "{}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\n",
+            "{}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\n",
             .{
                 n,
                 t_incl,
@@ -121,6 +148,9 @@ fn bench1(alloc: std.mem.Allocator) !void {
                 t_it1,
                 t_copyall,
                 t_copynone,
+                t_copy1,
+                t_copy2,
+                t_copy3,
             },
         );
     }
