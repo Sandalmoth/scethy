@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.table);
 
 const DataStorage = @import("storage.zig").DataStorage;
 const ImplStorage = @import("implementation.zig").ImplStorage;
@@ -173,8 +174,9 @@ pub fn Table(
             e: Entity,
             val: ComponentType(c),
             hint: Hint,
-        ) bool {
-            return table.data_storage.getPtr(c).ins(ComponentType(c), e, val, hint);
+        ) void {
+            const success = table.data_storage.getPtr(c).ins(ComponentType(c), e, val, hint);
+            if (!success) log.debug("Could not incl {} into {}", .{ c, e });
         }
 
         pub fn inclInterface(
@@ -183,19 +185,18 @@ pub fn Table(
             e: Entity,
             comptime Impl: type,
             impl: Impl,
-        ) bool {
+        ) void {
             const interface = table.impl_storage.getPtr(c).alloc(
                 ComponentType(c),
                 Impl,
                 impl,
             );
-            return table.inclData(c, e, interface, .static);
+            table.inclData(c, e, interface, .static);
         }
 
         pub fn excl(table: *Self, comptime c: Component, e: Entity) void {
-            _ = table;
-            _ = c;
-            _ = e;
+            const success = table.data_storage.getPtr(c).del(ComponentType(c), e);
+            if (!success) log.debug("Could not excl {} from {}", .{ c, e });
         }
 
         pub fn getPtr(table: *Self, comptime c: Component, e: Entity) ?*ComponentType(c) {
