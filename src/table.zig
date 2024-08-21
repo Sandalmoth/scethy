@@ -82,12 +82,11 @@ pub const Pool = struct {
     }
 
     pub fn destroy(pool: *Pool, ptr: *anyopaque) void {
+        // TODO some kind of memory reclamation strategy
         const block: *Block = @alignCast(@ptrCast(ptr));
         block.next = pool.free;
         pool.free = block;
         pool.n_free += 1;
-        // pool.alloc.destroy(block);
-        // pool.n_allocs -= 1;
     }
 };
 

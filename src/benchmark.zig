@@ -29,7 +29,7 @@ fn bench1(alloc: std.mem.Allocator) !void {
 
     var acc: u64 = 0;
 
-    const ns = [_]usize{ 1, 3, 10, 32, 100, 316, 1000, 3162, 10_000, 31623, 100_000 };
+    const ns = [_]usize{ 100, 316, 1000, 3162, 10_000, 31623, 100_000 };
 
     for (ns) |n| {
         _ = arena.reset(.retain_capacity);
@@ -101,14 +101,14 @@ fn bench1(alloc: std.mem.Allocator) !void {
             t.deinit();
             t = t_old;
         }
-        const t_copyall = @as(f64, @floatFromInt(timer.lap())) / 1e6;
+        const t_copyall = @as(f64, @floatFromInt(timer.lap())) * 1e-6;
 
         {
             const t_old = t.copy();
             t.deinit();
             t = t_old;
         }
-        const t_copynone = @as(f64, @floatFromInt(timer.lap())) / 1e6;
+        const t_copynone = @as(f64, @floatFromInt(timer.lap())) * 1e-6;
 
         try stdout.print(
             "{}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\t{d:.2}\n",
