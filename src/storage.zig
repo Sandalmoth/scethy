@@ -1,6 +1,12 @@
 const std = @import("std");
 const log = std.log.scoped(.data_storage);
 
+// TODO
+// static/dynamic pages should start from front/back
+// rather than from front/middle
+// since that way, the split between them wouldn't be predetermined
+// which meshes better with the interface components that don't use them
+
 const Entity = @import("table.zig").Entity;
 const nil = @import("table.zig").nil;
 const Pool = @import("table.zig").Pool;
@@ -168,7 +174,7 @@ const Bucket = struct {
         }
     }
 
-    fn getConstPtr(bucket: *Bucket, comptime V: type, page_index: *PageIndex, key: Entity) ?*const V {
+    fn getPtrConst(bucket: *Bucket, comptime V: type, page_index: *PageIndex, key: Entity) ?*const V {
         const h = hash(key);
         const fingerprint: u8 = @intCast(h >> 24);
         for (0..capacity) |probe| {
@@ -184,7 +190,7 @@ const Bucket = struct {
         }
 
         if (bucket.head.next) |next| {
-            return next.getConstPtr(V, page_index, key);
+            return next.getPtrConst(V, page_index, key);
         } else {
             return null;
         }
@@ -513,11 +519,11 @@ pub const DataStorage = struct {
         return storage.bucket_index.buckets[bucket_ix].?.getPtr(V, storage.page_index, key);
     }
 
-    pub fn getConstPtr(storage: *DataStorage, comptime V: type, key: Entity) ?*const V {
+    pub fn getPtrConst(storage: *DataStorage, comptime V: type, key: Entity) ?*const V {
         if (storage.n_buckets == 0) return null;
         if (key == nil) return null;
         const bucket_ix = storage.bucketIndex(key);
-        return storage.bucket_index.buckets[bucket_ix].?.getConstPtr(V, storage.page_index, key);
+        return storage.bucket_index.buckets[bucket_ix].?.getPtrConst(V, storage.page_index, key);
     }
 
     /// noop if present (returns false), true means key was added
@@ -850,6 +856,7 @@ pub const DataStorage = struct {
 
 test "storage interface" {
     var p = Pool.init(std.testing.allocator);
+    defer p.deinit();
     var s = DataStorage.init(&p);
     defer s.deinit();
 
@@ -858,7 +865,7 @@ test "storage interface" {
     try std.testing.expect(!s.ins(u8, 1, 1, .static));
     try std.testing.expect(s.getPtr(u8, 1) != null);
     try std.testing.expectEqual(0, s.getPtr(u8, 1).?.*);
-    try std.testing.expectEqual(0, s.getConstPtr(u8, 1).?.*);
+    try std.testing.expectEqual(0, s.getPtrConst(u8, 1).?.*);
     try std.testing.expect(s.del(u8, 1));
     try std.testing.expect(!s.del(u8, 1));
     try std.testing.expect(s.getPtr(u8, 1) == null);
@@ -878,6 +885,7 @@ test "storage interface" {
 
 test "storage fuzz (no copy)" {
     var p = Pool.init(std.testing.allocator);
+    defer p.deinit();
     var s = DataStorage.init(&p);
     defer s.deinit();
     var h = std.AutoHashMap(Entity, f64).init(std.testing.allocator);
@@ -934,6 +942,7 @@ test "storage fuzz (with copy)" {
     var hs: [N + 1]std.AutoHashMap(Entity, f64) = undefined;
 
     var p = Pool.init(std.testing.allocator);
+    defer p.deinit();
     var s = DataStorage.init(&p);
     var h = std.AutoHashMap(Entity, f64).init(std.testing.allocator);
     var a = try std.ArrayList(Entity).initCapacity(std.testing.allocator, 16 * 1024);
@@ -999,6 +1008,7 @@ test "storage fuzz (with copy)" {
 
 test "storage fuzz (no copy) v2" {
     var p = Pool.init(std.testing.allocator);
+    defer p.deinit();
     var s = DataStorage.init(&p);
     defer s.deinit();
     var h = std.AutoHashMap(Entity, u32).init(std.testing.allocator);
@@ -1059,7 +1069,7 @@ test "storage fuzz (no copy) v2" {
         while (sit.next()) |k| {
             try std.testing.expect(s.has(k));
             try std.testing.expect(h.contains(k));
-            const v = s.getConstPtr(u32, k).?.*;
+            const v = s.getPtrConst(u32, k).?.*;
             const v2 = h.get(k).?;
             try std.testing.expect(v == v2);
             acc_s +%= v;
@@ -1070,7 +1080,7 @@ test "storage fuzz (no copy) v2" {
             try std.testing.expect(s.has(k.*));
             try std.testing.expect(h.contains(k.*));
             const v = h.get(k.*).?;
-            const v2 = s.getConstPtr(u32, k.*).?.*;
+            const v2 = s.getPtrConst(u32, k.*).?.*;
             try std.testing.expect(v == v2);
             acc_h +%= v;
             nh += 1;
@@ -1082,6 +1092,7 @@ test "storage fuzz (no copy) v2" {
 
 test "storage fuzz (copy) v2" {
     var p = Pool.init(std.testing.allocator);
+    defer p.deinit();
     var s = DataStorage.init(&p);
     defer s.deinit();
     var h = std.AutoHashMap(Entity, u32).init(std.testing.allocator);
@@ -1134,7 +1145,7 @@ test "storage fuzz (copy) v2" {
 
             var sit = spre.entityIterator();
             while (sit.next()) |k| {
-                const v = spre.getConstPtr(u32, k).?.*;
+                const v = spre.getPtrConst(u32, k).?.*;
                 acc_s +%= v;
             }
             var hit = hpre.keyIterator();
@@ -1150,7 +1161,7 @@ test "storage fuzz (copy) v2" {
 
             var sit = s.entityIterator();
             while (sit.next()) |k| {
-                const v = s.getConstPtr(u32, k).?.*;
+                const v = s.getPtrConst(u32, k).?.*;
                 acc_s +%= v;
             }
             var hit = h.keyIterator();

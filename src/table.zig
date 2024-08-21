@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const DataStorage = @import("storage.zig").DataStorage;
+const ImplStorage = @import("implementation.zig").ImplStorage;
 
 pub const Entity = u64;
 pub const nil: Entity = 0;
@@ -32,27 +33,38 @@ pub const Pool = struct {
     }
 
     alloc: std.mem.Allocator,
+    n_allocs: usize,
 
     pub fn init(alloc: std.mem.Allocator) Pool {
         return .{
             .alloc = alloc,
+            .n_allocs = 0,
         };
+    }
+
+    pub fn deinit(pool: *Pool) void {
+        std.debug.assert(pool.n_allocs == 0);
+        pool.* = undefined;
     }
 
     pub fn create(pool: *Pool, comptime T: type) *T {
         std.debug.assert(@sizeOf(T) <= BLOCK_SIZE);
         std.debug.assert(@alignOf(T) <= BLOCK_ALIGN);
         const block = pool.alloc.create(Block) catch @panic("allocation failure");
+        pool.n_allocs += 1;
         return @alignCast(@ptrCast(block));
     }
 
     pub fn destroy(pool: *Pool, ptr: *anyopaque) void {
         const block: *Block = @alignCast(@ptrCast(ptr));
         pool.alloc.destroy(block);
+        pool.n_allocs -= 1;
     }
 };
 
-pub fn Table(comptime Vs: type, comptime Is: type) type {
+const ENTITY_GENERATOR_STEP = 712544676207699917; // prime number
+
+pub fn Table(comptime Vs: type) type {
     return struct {
         const Self = @This();
 
@@ -62,17 +74,14 @@ pub fn Table(comptime Vs: type, comptime Is: type) type {
             return std.meta.fields(Vs)[@intFromEnum(c)].type;
         }
 
-        pub const Interface = std.meta.FieldEnum(Is);
-        const n_interfaces = std.meta.fields(Interface).len;
-        fn InterfaceType(comptime i: Interface) type {
-            return std.meta.fields(Is)[@intFromEnum(i)].type;
-        }
-
         alloc: std.mem.Allocator,
         pool: *Pool,
         entities: DataStorage,
         data_storage: std.EnumArray(Component, DataStorage),
-        // interface_storage: std.EnumArray(Interface, DataStorage),
+        is_interface: std.EnumArray(Component, bool),
+        impl_storage: std.EnumArray(Component, ImplStorage),
+
+        entity_counter: Entity,
 
         pub fn init(alloc: std.mem.Allocator, pool: *Pool) *Self {
             var table = alloc.create(Self) catch @panic("Table.init: allocation falure");
@@ -83,13 +92,16 @@ pub fn Table(comptime Vs: type, comptime Is: type) type {
                 const c: Component = @enumFromInt(j);
                 table.data_storage.getPtr(c).* = DataStorage.init(pool);
                 errdefer table.data_storage.getPtr(c).deinit();
+                table.is_interface.getPtr(c).* = false;
             }
-            // inline for (0..n_interfaces) |j| {
-            //     const i: Component = @enumFromInt(j);
-            //     table.components.getPtr(i).* = try DataStorage.init(pool);
-            //     errdefer table.components.getPtr(i).deinit();
-            // }
+            table.entity_counter = nil + ENTITY_GENERATOR_STEP;
             return table;
+        }
+
+        pub fn markInterface(table: *Self, comptime c: Component) void {
+            std.debug.assert(table.is_interface.get(c) == false);
+            table.is_interface.getPtr(c).* = true;
+            table.impl_storage.getPtr(c).* = ImplStorage.init(table.pool);
         }
 
         pub fn deinit(table: *Self) void {
@@ -97,6 +109,7 @@ pub fn Table(comptime Vs: type, comptime Is: type) type {
             inline for (0..n_components) |j| {
                 const c: Component = @enumFromInt(j);
                 table.data_storage.getPtr(c).deinit();
+                if (table.is_interface.get(c)) table.impl_storage.getPtr(c).deinit();
             }
             table.alloc.destroy(table);
         }
@@ -106,97 +119,181 @@ pub fn Table(comptime Vs: type, comptime Is: type) type {
         }
 
         pub fn create(table: *Self) Entity {
-            _ = table;
-            return nil;
+            // realistically, we never need to handle this, 2**64 - 1 is more than necessary
+            // and we shouldn't reuse entity id's, since that could cause incorrect interpolation
+            // though if state interpolation isn't used, one could feasibly check for existance
+            // after one lap through the counter has been done
+            if (table.entity_counter == nil) @panic("entity generation overflow");
+            const e = table.entity_counter;
+            table.entity_counter +%= ENTITY_GENERATOR_STEP;
+            const success = table.entities.ins(void, e, {}, .static);
+            std.debug.assert(success);
+            return e;
         }
 
         pub fn exists(table: *Self, e: Entity) bool {
-            _ = table;
-            _ = e;
+            return table.entities.has(e);
         }
 
         pub fn destroy(table: *Self, e: Entity) void {
-            _ = table;
-            _ = e;
+            inline for (0..n_components) |j| {
+                const c: Component = @enumFromInt(j);
+                _ = table.data_storage.getPtr(c).del(ComponentType(c), e);
+            }
+            const success = table.entities.del(void, e);
+            std.debug.assert(success);
         }
 
-        pub fn queueDestroy(table: *Self, e: Entity) void {
-            _ = table;
-            _ = e;
-        }
-
-        pub fn ins(
+        pub fn inclData(
             table: *Self,
             comptime c: Component,
-            hint: Hint,
             e: Entity,
             val: ComponentType(c),
-        ) void {
-            _ = table;
-            _ = e;
-            _ = val;
-            _ = hint;
+            hint: Hint,
+        ) bool {
+            return table.data_storage.getPtr(c).ins(ComponentType(c), e, val, hint);
         }
 
-        pub fn insInterface(
+        pub fn inclInterface(
             table: *Self,
             comptime c: Component,
             e: Entity,
-            Impl: type,
-        ) void {
-            _ = table;
-            _ = c;
-            _ = e;
-            _ = Impl;
+            comptime Impl: type,
+            impl: Impl,
+        ) bool {
+            const interface = table.impl_storage.getPtr(c).alloc(
+                ComponentType(c),
+                Impl,
+                impl,
+            );
+            return table.inclData(c, e, interface, .static);
         }
 
-        pub fn del(table: *Self, comptime c: Component, e: Entity) void {
+        pub fn excl(table: *Self, comptime c: Component, e: Entity) void {
             _ = table;
             _ = c;
             _ = e;
         }
 
         pub fn getPtr(table: *Self, comptime c: Component, e: Entity) ?*ComponentType(c) {
-            _ = table;
-            _ = e;
+            return table.data_storage.getPtr(c).getPtr(ComponentType(c), e);
         }
 
-        pub fn getConstPtr(
+        pub fn getPtrConst(
             table: *Self,
             comptime c: Component,
             e: Entity,
         ) ?*const ComponentType(c) {
-            _ = table;
-            _ = e;
+            return table.data_storage.getPtr(c).getPtrConst(ComponentType(c), e);
         }
 
         pub fn has(table: *Self, c: Component, e: Entity) bool {
-            _ = table;
-            _ = c;
-            _ = e;
+            return table.data_storage.getPtr(c).has(e);
         }
+
+        // pub fn queueDestroy(table: *Self, e: Entity) void {
+        //     _ = table;
+        //     _ = e;
+        // }
+
+        // pub fn queueExcl(table: *Self, comptime c: Component, e: Entity) void {
+        //     _ = table;
+        //     _ = c;
+        //     _ = e;
+        // }
     };
 }
 
 const V1 = struct {
     int: u32,
-};
-const I1 = struct {
     float: f32,
+    behaviour: I1,
+};
+
+const I1 = struct {
+    ctx: *anyopaque,
+    vtable: VTable,
+
+    const VTable = struct {
+        foo: *const fn (*anyopaque) void,
+    };
+
+    fn foo(i: I1) void {
+        i.vtable.foo(i.ctx);
+    }
+};
+
+const B1 = struct {
+    fn foo(ctx: *anyopaque) void {
+        _ = ctx;
+        std.debug.print("hello from B1\n", .{});
+    }
+
+    pub fn interface(b: *B1) I1 {
+        return .{
+            .ctx = @alignCast(@ptrCast(b)),
+            .vtable = .{ .foo = foo },
+        };
+    }
+};
+
+const B2 = struct {
+    x: usize,
+
+    fn foo(ctx: *anyopaque) void {
+        const b: *B2 = @alignCast(@ptrCast(ctx));
+        std.debug.print("hello #{} from B2\n", .{b.x});
+        b.x += 1;
+    }
+
+    pub fn interface(b: *B2) I1 {
+        return .{
+            .ctx = @alignCast(@ptrCast(b)),
+            .vtable = .{ .foo = foo },
+        };
+    }
 };
 
 test "scratch" {
-    const T = Table(V1, I1);
+    const T = Table(V1);
     inline for (std.meta.fields(T.Component)) |c| {
-        std.debug.print("{s}\n", .{c.name});
-    }
-    inline for (std.meta.fields(T.Interface)) |c| {
         std.debug.print("{s}\n", .{c.name});
     }
 
     var p = Pool.init(std.testing.allocator);
+    defer p.deinit();
     var t = T.init(std.testing.allocator, &p);
     defer t.deinit();
+
+    t.markInterface(.behaviour);
+
+    const e0 = t.create();
+    std.debug.print("{}\n", .{t.has(.int, e0)});
+    std.debug.print("{}\n", .{t.has(.float, e0)});
+    std.debug.print("{}\n", .{t.inclData(.int, e0, 123, .static)});
+    std.debug.print("{}\n", .{t.inclData(.int, e0, 234, .static)});
+    std.debug.print("{}\n", .{t.inclData(.int, e0, 234, .dynamic)});
+    std.debug.print("{}\n", .{t.inclData(.float, e0, 1.0, .dynamic)});
+    std.debug.print("{}\n", .{t.inclData(.float, e0, 2.0, .static)});
+    std.debug.print("{}\n", .{t.inclData(.float, e0, 2.0, .dynamic)});
+    if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
+    if (t.getPtr(.int, e0)) |ptr| ptr.* += 1;
+    if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
+    std.debug.print("{}\n", .{t.has(.int, e0)});
+    std.debug.print("{}\n", .{t.has(.float, e0)});
+    t.destroy(e0);
+
+    const e1 = t.create();
+    _ = t.inclInterface(.behaviour, e1, B1, .{});
+    t.getPtr(.behaviour, e1).?.foo();
+    t.destroy(e1);
+
+    const e2 = t.create();
+    _ = t.inclInterface(.behaviour, e2, B2, .{ .x = 0 });
+    t.getPtr(.behaviour, e2).?.foo();
+    t.getPtr(.behaviour, e2).?.foo();
+    t.getPtr(.behaviour, e2).?.foo();
+    t.destroy(e2);
 }
 
 // define with struct mapping component names to types
