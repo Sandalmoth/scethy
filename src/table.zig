@@ -26,7 +26,10 @@ pub const Pool = struct {
     // all ecs data lives in these blocks s.t. we an alloc/dealloc efficiently
     pub const BLOCK_SIZE = 4 * 1024;
     pub const BLOCK_ALIGN = 64;
-    const Block = struct { data: [BLOCK_SIZE]u8 align(BLOCK_ALIGN) };
+    const Block = struct {
+        data: [BLOCK_SIZE - @sizeOf(usize)]u8 align(BLOCK_ALIGN),
+        next: ?*Block,
+    };
 
     comptime {
         std.debug.assert(@sizeOf(Block) == BLOCK_SIZE);
@@ -35,31 +38,56 @@ pub const Pool = struct {
 
     alloc: std.mem.Allocator,
     n_allocs: usize,
+    n_free: usize,
+    free: ?*Block,
 
     pub fn init(alloc: std.mem.Allocator) Pool {
         return .{
             .alloc = alloc,
             .n_allocs = 0,
+            .n_free = 0,
+            .free = null,
         };
     }
 
     pub fn deinit(pool: *Pool) void {
+        std.debug.assert(pool.n_allocs == pool.n_free);
+        var walk = pool.free;
+        while (walk) |b| {
+            walk = b.next;
+            pool.alloc.destroy(b);
+            pool.n_free -= 1;
+            pool.n_allocs -= 1;
+        }
         std.debug.assert(pool.n_allocs == 0);
+        std.debug.assert(pool.n_free == 0);
         pool.* = undefined;
     }
 
     pub fn create(pool: *Pool, comptime T: type) *T {
         std.debug.assert(@sizeOf(T) <= BLOCK_SIZE);
         std.debug.assert(@alignOf(T) <= BLOCK_ALIGN);
-        const block = pool.alloc.create(Block) catch @panic("allocation failure");
-        pool.n_allocs += 1;
-        return @alignCast(@ptrCast(block));
+
+        if (pool.free == null) {
+            const block = pool.alloc.create(Block) catch @panic("allocation failure");
+            pool.n_allocs += 1;
+            return @alignCast(@ptrCast(block));
+        } else {
+            const block = pool.free.?;
+            pool.free = block.next;
+            block.next = null;
+            pool.n_free -= 1;
+            return @alignCast(@ptrCast(block));
+        }
     }
 
     pub fn destroy(pool: *Pool, ptr: *anyopaque) void {
         const block: *Block = @alignCast(@ptrCast(ptr));
-        pool.alloc.destroy(block);
-        pool.n_allocs -= 1;
+        block.next = pool.free;
+        pool.free = block;
+        pool.n_free += 1;
+        // pool.alloc.destroy(block);
+        // pool.n_allocs -= 1;
     }
 };
 
@@ -245,7 +273,7 @@ pub fn Table(
             while (include_unsorted) {
                 include_unsorted = false;
                 for (1..include.len) |i| {
-                    if (include_sorted[i - 1].?.len > include_sorted[i].?.len) {
+                    if (include_sorted[i - 1].len > include_sorted[i].len) {
                         const tmp = include_sorted[i];
                         include_sorted[i] = include_sorted[i - 1];
                         include_sorted[i - 1] = tmp;
@@ -261,7 +289,7 @@ pub fn Table(
                 while (exclude_unsorted) {
                     exclude_unsorted = true;
                     for (1..exclude.len) |i| {
-                        if (exclude_sorted[i - 1].?.len < exclude_sorted[i].?.len) {
+                        if (exclude_sorted[i - 1].len < exclude_sorted[i].len) {
                             const tmp = exclude_sorted[i];
                             exclude_sorted[i] = exclude_sorted[i - 1];
                             exclude_sorted[i - 1] = tmp;
