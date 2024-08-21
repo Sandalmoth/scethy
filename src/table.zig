@@ -64,21 +64,32 @@ pub const Pool = struct {
 
 const ENTITY_GENERATOR_STEP = 712544676207699917; // prime number
 
-pub fn Table(comptime Vs: type) type {
+const ComponentSpec = struct {
+    typ: type,
+    interface: bool = false,
+};
+
+pub fn Table(
+    comptime Component: type,
+    comptime Spec: std.enums.EnumFieldStruct(Component, ComponentSpec, null),
+) type {
     return struct {
         const Self = @This();
 
-        pub const Component = std.meta.FieldEnum(Vs);
+        // pub const Component = std.meta.FieldEnum(Vs);
         const n_components = std.meta.fields(Component).len;
+        const spec = std.EnumArray(Component, ComponentSpec).init(Spec);
         fn ComponentType(comptime c: Component) type {
-            return std.meta.fields(Vs)[@intFromEnum(c)].type;
+            return spec.get(c).typ;
+        }
+        fn isInterface(comptime c: Component) bool {
+            return spec.get(c).interface;
         }
 
         alloc: std.mem.Allocator,
         pool: *Pool,
         entities: DataStorage,
         data_storage: std.EnumArray(Component, DataStorage),
-        is_interface: std.EnumArray(Component, bool),
         impl_storage: std.EnumArray(Component, ImplStorage),
 
         entity_counter: Entity,
@@ -91,17 +102,10 @@ pub fn Table(comptime Vs: type) type {
             inline for (0..n_components) |j| {
                 const c: Component = @enumFromInt(j);
                 table.data_storage.getPtr(c).* = DataStorage.init(pool);
-                errdefer table.data_storage.getPtr(c).deinit();
-                table.is_interface.getPtr(c).* = false;
+                if (isInterface(c)) table.impl_storage.getPtr(c).* = ImplStorage.init(table.pool);
             }
             table.entity_counter = nil + ENTITY_GENERATOR_STEP;
             return table;
-        }
-
-        pub fn markInterface(table: *Self, comptime c: Component) void {
-            std.debug.assert(table.is_interface.get(c) == false);
-            table.is_interface.getPtr(c).* = true;
-            table.impl_storage.getPtr(c).* = ImplStorage.init(table.pool);
         }
 
         pub fn deinit(table: *Self) void {
@@ -109,13 +113,32 @@ pub fn Table(comptime Vs: type) type {
             inline for (0..n_components) |j| {
                 const c: Component = @enumFromInt(j);
                 table.data_storage.getPtr(c).deinit();
-                if (table.is_interface.get(c)) table.impl_storage.getPtr(c).deinit();
+                if (isInterface(c)) table.impl_storage.getPtr(c).deinit();
             }
             table.alloc.destroy(table);
         }
 
         pub fn copy(table: *Self) *Self {
-            _ = table;
+            var new = table.alloc.create(Self) catch @panic("Table.copy: allocation failure");
+            new.alloc = table.alloc;
+            new.pool = table.pool;
+            new.entities = table.entities.copy(void);
+            inline for (0..n_components) |j| {
+                const c: Component = @enumFromInt(j);
+                new.data_storage.getPtr(c).* = table.data_storage.getPtr(c).copy(ComponentType(c));
+                errdefer new.data_storage.getPtr(c).deinit();
+                if (comptime isInterface(c)) {
+                    new.impl_storage.getPtr(c).* = ImplStorage.init(new.pool);
+                    const s = new.data_storage.getPtr(c);
+                    var it = s.entityIterator();
+                    while (it.next()) |e| {
+                        const _i = s.getPtr(ComponentType(c), e).?;
+                        _i.ctx = new.impl_storage.getPtr(c).allocCopy(_i.ctx);
+                    }
+                }
+            }
+            new.entity_counter = table.entity_counter;
+            return new;
         }
 
         pub fn create(table: *Self) Entity {
@@ -190,17 +213,6 @@ pub fn Table(comptime Vs: type) type {
         pub fn has(table: *Self, c: Component, e: Entity) bool {
             return table.data_storage.getPtr(c).has(e);
         }
-
-        // pub fn queueDestroy(table: *Self, e: Entity) void {
-        //     _ = table;
-        //     _ = e;
-        // }
-
-        // pub fn queueExcl(table: *Self, comptime c: Component, e: Entity) void {
-        //     _ = table;
-        //     _ = c;
-        //     _ = e;
-        // }
     };
 }
 
@@ -209,6 +221,14 @@ const V1 = struct {
     float: f32,
     behaviour: I1,
 };
+
+const V2 = struct {
+    int: .{ .typ = u32, .ifc = false },
+    float: .{ .typ = f32, .ifc = false },
+    behaviour: .{ .typ = I1, .ifc = true },
+};
+
+const V3 = enum { int, float, behaviour };
 
 const I1 = struct {
     ctx: *anyopaque,
@@ -255,17 +275,16 @@ const B2 = struct {
 };
 
 test "scratch" {
-    const T = Table(V1);
-    inline for (std.meta.fields(T.Component)) |c| {
-        std.debug.print("{s}\n", .{c.name});
-    }
+    const T = Table(V3, .{
+        .int = .{ .typ = u32 },
+        .float = .{ .typ = f32 },
+        .behaviour = .{ .typ = I1, .interface = true },
+    });
 
     var p = Pool.init(std.testing.allocator);
     defer p.deinit();
     var t = T.init(std.testing.allocator, &p);
     defer t.deinit();
-
-    t.markInterface(.behaviour);
 
     const e0 = t.create();
     std.debug.print("{}\n", .{t.has(.int, e0)});
@@ -293,6 +312,17 @@ test "scratch" {
     t.getPtr(.behaviour, e2).?.foo();
     t.getPtr(.behaviour, e2).?.foo();
     t.getPtr(.behaviour, e2).?.foo();
+
+    {
+        const t_old = t.copy();
+        t.deinit();
+        t = t_old;
+    }
+
+    t.getPtr(.behaviour, e2).?.foo();
+    t.getPtr(.behaviour, e2).?.foo();
+    t.getPtr(.behaviour, e2).?.foo();
+
     t.destroy(e2);
 }
 

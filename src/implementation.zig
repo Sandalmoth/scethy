@@ -45,6 +45,16 @@ const Page = struct {
         return result;
     }
 
+    fn allocHeader(page: *Page, header: ImplHeader) ?*anyopaque {
+        const result: *anyopaque = @ptrFromInt(page.head.offset);
+        page.head.offset = std.mem.alignForward(usize, page.head.offset, header._align);
+        page.head.offset += header.size;
+        if (page.head.offset > page.head.end) return null;
+        getHeader(result).* = header;
+        page.head.offset += 8;
+        return result;
+    }
+
     fn getHeader(ptr: *anyopaque) *ImplHeader {
         return @ptrFromInt(@intFromPtr(ptr) - 8);
     }
@@ -88,6 +98,22 @@ pub const ImplStorage = struct {
         };
         impl.* = val;
         return impl.interface();
+    }
+
+    pub fn allocCopy(storage: *ImplStorage, ctx: *anyopaque) *anyopaque {
+        if (storage.n_pages == 0) storage.newPage();
+        const head = Page.getHeader(ctx);
+        const impl = storage.page_index.pages[storage.n_pages - 1].?.allocHeader(head.*) orelse
+            blk: {
+            storage.newPage();
+            break :blk storage.page_index.pages[storage.n_pages - 1].?.allocHeader(head.*) orelse
+                unreachable;
+        };
+        @memcpy(
+            @as([*]u8, @alignCast(@ptrCast(impl))),
+            @as([*]u8, @alignCast(@ptrCast(ctx)))[0..head.size],
+        );
+        return impl;
     }
 
     fn newPage(storage: *ImplStorage) void {
