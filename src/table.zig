@@ -66,7 +66,7 @@ pub const Pool = struct {
 const ENTITY_GENERATOR_STEP = 712544676207699917; // prime number
 
 const ComponentSpec = struct {
-    typ: type,
+    type: type,
     interface: bool = false,
 };
 
@@ -80,7 +80,7 @@ pub fn Table(
         const n_components = std.meta.fields(Component).len;
         const spec = std.EnumArray(Component, ComponentSpec).init(Spec);
         fn ComponentType(comptime c: Component) type {
-            return spec.get(c).typ;
+            return spec.get(c).type;
         }
         fn isInterface(comptime c: Component) bool {
             return spec.get(c).interface;
@@ -283,20 +283,6 @@ pub fn Table(
     };
 }
 
-const V1 = struct {
-    int: u32,
-    float: f32,
-    behaviour: I1,
-};
-
-const V2 = struct {
-    int: .{ .typ = u32, .ifc = false },
-    float: .{ .typ = f32, .ifc = false },
-    behaviour: .{ .typ = I1, .ifc = true },
-};
-
-const V3 = enum { int, float, behaviour };
-
 const I1 = struct {
     ctx: *anyopaque,
     vtable: VTable,
@@ -343,9 +329,9 @@ const B2 = struct {
 
 test "scratch" {
     const T = Table(.{
-        .int = .{ .typ = u32 },
-        .float = .{ .typ = f32 },
-        .behaviour = .{ .typ = I1, .interface = true },
+        .int = .{ .type = u32 },
+        .float = .{ .type = f32 },
+        .behaviour = .{ .type = I1, .interface = true },
     });
 
     var p = Pool.init(std.testing.allocator);
