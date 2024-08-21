@@ -71,13 +71,12 @@ const ComponentSpec = struct {
 };
 
 pub fn Table(
-    comptime Component: type,
-    comptime Spec: std.enums.EnumFieldStruct(Component, ComponentSpec, null),
+    comptime Spec: anytype,
 ) type {
     return struct {
         const Self = @This();
 
-        // pub const Component = std.meta.FieldEnum(Vs);
+        pub const Component = std.meta.FieldEnum(@TypeOf(Spec));
         const n_components = std.meta.fields(Component).len;
         const spec = std.EnumArray(Component, ComponentSpec).init(Spec);
         fn ComponentType(comptime c: Component) type {
@@ -168,7 +167,7 @@ pub fn Table(
             std.debug.assert(success);
         }
 
-        pub fn inclData(
+        pub fn incl(
             table: *Self,
             comptime c: Component,
             e: Entity,
@@ -191,7 +190,7 @@ pub fn Table(
                 Impl,
                 impl,
             );
-            table.inclData(c, e, interface, .static);
+            table.incl(c, e, interface, .static);
         }
 
         pub fn excl(table: *Self, comptime c: Component, e: Entity) void {
@@ -343,7 +342,7 @@ const B2 = struct {
 };
 
 test "scratch" {
-    const T = Table(V3, .{
+    const T = Table(.{
         .int = .{ .typ = u32 },
         .float = .{ .typ = f32 },
         .behaviour = .{ .typ = I1, .interface = true },
@@ -357,12 +356,12 @@ test "scratch" {
     const e0 = t.create();
     std.debug.print("{}\n", .{t.has(.int, e0)});
     std.debug.print("{}\n", .{t.has(.float, e0)});
-    std.debug.print("{}\n", .{t.inclData(.int, e0, 123, .static)});
-    std.debug.print("{}\n", .{t.inclData(.int, e0, 234, .static)});
-    std.debug.print("{}\n", .{t.inclData(.int, e0, 234, .dynamic)});
-    std.debug.print("{}\n", .{t.inclData(.float, e0, 1.0, .dynamic)});
-    std.debug.print("{}\n", .{t.inclData(.float, e0, 2.0, .static)});
-    std.debug.print("{}\n", .{t.inclData(.float, e0, 2.0, .dynamic)});
+    std.debug.print("{}\n", .{t.incl(.int, e0, 123, .static)});
+    std.debug.print("{}\n", .{t.incl(.int, e0, 234, .static)});
+    std.debug.print("{}\n", .{t.incl(.int, e0, 234, .dynamic)});
+    std.debug.print("{}\n", .{t.incl(.float, e0, 1.0, .dynamic)});
+    std.debug.print("{}\n", .{t.incl(.float, e0, 2.0, .static)});
+    std.debug.print("{}\n", .{t.incl(.float, e0, 2.0, .dynamic)});
     if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
     if (t.getPtr(.int, e0)) |ptr| ptr.* += 1;
     if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
