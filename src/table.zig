@@ -24,7 +24,7 @@ pub const EntityStream = struct {
 
 pub const Pool = struct {
     // all ecs data lives in these blocks s.t. we an alloc/dealloc efficiently
-    pub const BLOCK_SIZE = 4 * 1024;
+    pub const BLOCK_SIZE = 16 * 1024;
     pub const BLOCK_ALIGN = 64;
     const Block = struct {
         data: [BLOCK_SIZE - @sizeOf(usize)]u8 align(BLOCK_ALIGN),
