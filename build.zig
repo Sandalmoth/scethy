@@ -21,15 +21,9 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // library part to be reused
-    const lib = b.addStaticLibrary(.{
-        .name = "zigtest3",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
+    _ = b.addModule(.{
         .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
     });
-    b.installArtifact(lib);
 
     // tests
     const unit_tests = b.addTest(.{
