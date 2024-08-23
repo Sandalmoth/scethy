@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // library part to be reused
-    _ = b.addModule(.{
+    _ = b.addModule("scethy", .{
         .root_source_file = b.path("src/root.zig"),
     });
 
