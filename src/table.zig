@@ -354,65 +354,146 @@ const B2 = struct {
     }
 };
 
-test "scratch" {
+// test "scratch" {
+//     const T = Table(.{
+//         .int = .{ .type = u32 },
+//         .float = .{ .type = f32 },
+//         .behaviour = .{ .type = I1, .interface = true },
+//     });
+
+//     var p = Pool.init(std.testing.allocator);
+//     defer p.deinit();
+//     var t = T.init(std.testing.allocator, &p);
+//     defer t.deinit();
+
+//     const e0 = t.create();
+//     std.debug.print("{}\n", .{t.has(.int, e0)});
+//     std.debug.print("{}\n", .{t.has(.float, e0)});
+//     std.debug.print("{}\n", .{t.incl(.int, e0, 123, .static)});
+//     std.debug.print("{}\n", .{t.incl(.int, e0, 234, .static)});
+//     std.debug.print("{}\n", .{t.incl(.int, e0, 234, .dynamic)});
+//     std.debug.print("{}\n", .{t.incl(.float, e0, 1.0, .dynamic)});
+//     std.debug.print("{}\n", .{t.incl(.float, e0, 2.0, .static)});
+//     std.debug.print("{}\n", .{t.incl(.float, e0, 2.0, .dynamic)});
+//     if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
+//     if (t.getPtr(.int, e0)) |ptr| ptr.* += 1;
+//     if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
+//     std.debug.print("{}\n", .{t.has(.int, e0)});
+//     std.debug.print("{}\n", .{t.has(.float, e0)});
+
+//     const e1 = t.create();
+//     _ = t.inclInterface(.behaviour, e1, B1, .{});
+//     t.getPtr(.behaviour, e1).?.foo();
+
+//     const e2 = t.create();
+//     _ = t.inclInterface(.behaviour, e2, B2, .{ .x = 0 });
+//     t.getPtr(.behaviour, e2).?.foo();
+//     t.getPtr(.behaviour, e2).?.foo();
+//     t.getPtr(.behaviour, e2).?.foo();
+
+//     {
+//         const t_old = t.copy();
+//         t.deinit();
+//         t = t_old;
+//     }
+
+//     t.getPtr(.behaviour, e2).?.foo();
+//     t.getPtr(.behaviour, e2).?.foo();
+//     t.getPtr(.behaviour, e2).?.foo();
+
+//     var q_int = t.query(&.{.int}, &.{});
+//     while (q_int.next()) |e| {
+//         std.debug.print("{}\n", .{t.getPtrConst(.int, e).?.*});
+//     }
+
+//     var q_float = t.query(&.{.float}, &.{});
+//     while (q_float.next()) |e| {
+//         std.debug.print("{}\n", .{t.getPtrConst(.float, e).?.*});
+//     }
+
+//     var q_behaviour = t.query(&.{.behaviour}, &.{});
+//     while (q_behaviour.next()) |e| {
+//         t.getPtrConst(.behaviour, e).?.foo();
+//     }
+// }
+
+test "entity id on copy" {
     const T = Table(.{
         .int = .{ .type = u32 },
         .float = .{ .type = f32 },
-        .behaviour = .{ .type = I1, .interface = true },
     });
 
     var p = Pool.init(std.testing.allocator);
     defer p.deinit();
     var t = T.init(std.testing.allocator, &p);
-    defer t.deinit();
 
-    const e0 = t.create();
-    std.debug.print("{}\n", .{t.has(.int, e0)});
-    std.debug.print("{}\n", .{t.has(.float, e0)});
-    std.debug.print("{}\n", .{t.incl(.int, e0, 123, .static)});
-    std.debug.print("{}\n", .{t.incl(.int, e0, 234, .static)});
-    std.debug.print("{}\n", .{t.incl(.int, e0, 234, .dynamic)});
-    std.debug.print("{}\n", .{t.incl(.float, e0, 1.0, .dynamic)});
-    std.debug.print("{}\n", .{t.incl(.float, e0, 2.0, .static)});
-    std.debug.print("{}\n", .{t.incl(.float, e0, 2.0, .dynamic)});
-    if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
-    if (t.getPtr(.int, e0)) |ptr| ptr.* += 1;
-    if (t.getPtrConst(.int, e0)) |ptr| std.debug.print("{}\n", .{ptr.*});
-    std.debug.print("{}\n", .{t.has(.int, e0)});
-    std.debug.print("{}\n", .{t.has(.float, e0)});
+    var a = std.ArrayList(Entity).init(std.testing.allocator);
+    defer a.deinit();
 
-    const e1 = t.create();
-    _ = t.inclInterface(.behaviour, e1, B1, .{});
-    t.getPtr(.behaviour, e1).?.foo();
+    for (0..10_000) |_| {
+        try a.append(t.create());
+    }
 
-    const e2 = t.create();
-    _ = t.inclInterface(.behaviour, e2, B2, .{ .x = 0 });
-    t.getPtr(.behaviour, e2).?.foo();
-    t.getPtr(.behaviour, e2).?.foo();
-    t.getPtr(.behaviour, e2).?.foo();
+    var t2 = t.copy();
+
+    for (a.items) |e| {
+        try std.testing.expect(t.exists(e));
+        try std.testing.expect(t2.exists(e));
+    }
 
     {
-        const t_old = t.copy();
+        var it = t.entities.entityIterator();
+        while (it.next()) |e| {
+            try std.testing.expect(t2.exists(e));
+        }
+    }
+    {
+        var it = t2.entities.entityIterator();
+        while (it.next()) |e| {
+            try std.testing.expect(t.exists(e));
+        }
+    }
+
+    t.deinit();
+
+    for (a.items) |e| {
+        try std.testing.expect(t2.exists(e));
+    }
+
+    t2.deinit();
+}
+
+test "entity id on copy 2" {
+    const T = Table(.{
+        .int = .{ .type = u32 },
+        .float = .{ .type = f32 },
+    });
+
+    var p = Pool.init(std.testing.allocator);
+    defer p.deinit();
+    var t = T.init(std.testing.allocator, &p);
+
+    var a = std.ArrayList(Entity).init(std.testing.allocator);
+    defer a.deinit();
+
+    for (0..10_000) |_| {
+        const e = t.create();
+        t.incl(.int, e, 1337, .static);
+        t.incl(.float, e, 1337.0, .static);
+        try a.append(e);
+    }
+
+    for (0..100) |_| {
+        const t2 = t.copy();
         t.deinit();
-        t = t_old;
+        t = t2;
     }
 
-    t.getPtr(.behaviour, e2).?.foo();
-    t.getPtr(.behaviour, e2).?.foo();
-    t.getPtr(.behaviour, e2).?.foo();
-
-    var q_int = t.query(&.{.int}, &.{});
-    while (q_int.next()) |e| {
-        std.debug.print("{}\n", .{t.getPtrConst(.int, e).?.*});
+    for (a.items) |e| {
+        try std.testing.expect(t.exists(e));
+        try std.testing.expectEqual(1337, t.getPtr(.int, e).?.*);
+        try std.testing.expectEqual(1337.0, t.getPtr(.float, e).?.*);
     }
 
-    var q_float = t.query(&.{.float}, &.{});
-    while (q_float.next()) |e| {
-        std.debug.print("{}\n", .{t.getPtrConst(.float, e).?.*});
-    }
-
-    var q_behaviour = t.query(&.{.behaviour}, &.{});
-    while (q_behaviour.next()) |e| {
-        t.getPtrConst(.behaviour, e).?.foo();
-    }
+    t.deinit();
 }
